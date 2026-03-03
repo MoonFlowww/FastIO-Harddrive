@@ -1,3 +1,81 @@
+// Min result over 5 runs (Outliers only exist in +side due to CPU interupts)
+// [Raw]             ~30ms per 1m rows single column search
+// [Thread]          ~ 7ms per 1m rows single column search
+// [Thread & AVX512] ~ 5ms per 1m rows single column search
+
+
+//TODO:
+//  -switch raw names to std::array<char, 4>
+//  -slice GPU decoding + unsync multithread for lightweight max speed
+
+//---------------------------------------------Use unordered_map to make it academically fast O(1) (slower in time)---------------------
+// 󰣇 codebase/cpp/Aladata ❯ g++ -std=c++20 -O3 -march=native -DRUN_O1SEARCH=1 find.cpp $(root-config --cflags --libs) && ./a.out                                                                                               14:41 
+// [14:41:07] Use O(1) search via unordered_map to search the name
+// [Sys] Found 4 users named: alice
+//    Within a database made of 59406880 users
+//  [User]: alice [Age]: 45
+//  [User]: alice [Age]: 19
+//  [User]: alice [Age]: 30
+//  [User]: alice [Age]: 61
+//
+// #========================================================================================================================================#
+// | LATTE TELEMETRY [TIME][RAW]                                                                                                            |
+// #========================================================================================================================================#
+// | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |     BYPASS |
+// |----------------------------------------------------------------------------------------------------------------------------------------|
+// | 2) Search            |         1 |     1.33 s |     1.33 s |    0.00 ns |     0.00 |     1.33 s |     1.33 s |    0.00 ns |          0 |
+// | 2.1) Search LoadInde |         1 |     1.33 s |     1.33 s |    0.00 ns |     0.00 |     1.33 s |     1.33 s |    0.00 ns |          0 |
+// | 2.2) Search find     |         1 |  361.41 us |  361.41 us |    0.00 ns |     0.00 |  361.41 us |  361.41 us |    0.00 ns |          0 |
+// | 3) Read              |         1 |   29.34 ms |   29.34 ms |    0.00 ns |     0.00 |   29.34 ms |   29.34 ms |    0.00 ns |          0 |
+// | 3.1) Read Init       |         1 |   23.10 us |   23.10 us |    0.00 ns |     0.00 |   23.10 us |   23.10 us |    0.00 ns |          0 |
+// | 3.2) Read Findings   |         3 |    5.58 ms |    6.25 ms |    1.82 ms |    -0.50 |    3.09 ms |    7.39 ms |    4.30 ms |          0 |
+// | 1) Write             |         1 |    40.15 s |    40.15 s |    0.00 ns |     0.00 |    40.15 s |    40.15 s |    0.00 ns |          0 |
+// | 1.1) Write init      |         1 |  114.12 ms |  114.12 ms |    0.00 ns |     0.00 |  114.12 ms |  114.12 ms |    0.00 ns |          0 |
+// | 0) Rng chars         |     65533 |  105.42 ns |    9.81 ns |  204.66 ns |     2.05 |    0.21 ns |    2.37 us |    2.37 us |          3 |
+// | 1.2) Write Loop      |     65532 |  530.47 ns |  510.96 ns |  170.56 ns |     3.83 |   70.13 ns |    5.11 us |    5.04 us |          4 |
+// | 1.3) Write SaveIndex |         1 |     2.12 s |     2.12 s |    0.00 ns |     0.00 |     2.12 s |     2.12 s |    0.00 ns |          0 |
+// | Global               |         1 |    45.43 s |    45.43 s |    0.00 ns |     0.00 |    45.43 s |    45.43 s |    0.00 ns |          0 |
+// #========================================================================================================================================#
+// Searching took: 1.33 s
+// [Expected] RNtuple search take 22.34 ms per 1M iters 
+// Total Rows: 59.41 M
+
+
+//------------------------------------------Iterative search MaxThread+AVX512 O(n) (Fast)
+// 󰣇 codebase/cpp/Aladata ❯ g++ -std=c++20 -O3 -march=native -DRUN_O1SEARCH=0 find.cpp $(root-config --cflags --libs) && ./a.out                                                                                               14:45 
+// [14:45:18] Use Iterative method with MaxThread + AVX512 to search the name
+// [Sys] Found 4 users named: alice
+//    Within a database made of 59406880 users
+//  [User]: alice [Age]: 45
+//  [User]: alice [Age]: 19
+//  [User]: alice [Age]: 30
+//  [User]: alice [Age]: 61
+//
+// #========================================================================================================================================#
+// | LATTE TELEMETRY [TIME][RAW]                                                                                                            |
+// #========================================================================================================================================#
+// | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |     BYPASS |
+// |----------------------------------------------------------------------------------------------------------------------------------------|
+// | 2) Search            |         1 |  376.86 ms |  376.86 ms |    0.00 ns |     0.00 |  376.86 ms |  376.86 ms |    0.00 ns |          0 |
+// | 2.1) Search Init     |         1 |  341.52 us |  341.52 us |    0.00 ns |     0.00 |  341.52 us |  341.52 us |    0.00 ns |          0 |
+// | 2.2) Search Loop     |         1 |  347.23 ms |  347.23 ms |    0.00 ns |     0.00 |  347.23 ms |  347.23 ms |    0.00 ns |          0 |
+// | 2.3) Search Thread   |        11 |   56.90 us |   48.41 us |   21.48 us |     0.36 |   26.91 us |   96.44 us |   69.53 us |          0 |
+// | 3) Read              |         1 |   29.23 ms |   29.23 ms |    0.00 ns |     0.00 |   29.23 ms |   29.23 ms |    0.00 ns |          0 |
+// | 3.1) Read Init       |         1 |   19.91 us |   19.91 us |    0.00 ns |     0.00 |   19.91 us |   19.91 us |    0.00 ns |          0 |
+// | 3.2) Read Findings   |         3 |    5.71 ms |    6.01 ms |    2.01 ms |    -0.22 |    3.11 ms |    8.00 ms |    4.89 ms |          0 |
+// | 2.4) Search AVX512   |    786427 |   10.33 ns |    9.81 ns |   28.84 ns |    12.89 |    0.21 ns |    1.50 us |    1.50 us |          5 |
+// | 1) Write             |         1 |    11.34 s |    11.34 s |    0.00 ns |     0.00 |    11.34 s |    11.34 s |    0.00 ns |          0 |
+// | 1.1) Write init      |         1 |  113.18 ms |  113.18 ms |    0.00 ns |     0.00 |  113.18 ms |  113.18 ms |    0.00 ns |          0 |
+// | 0) Rng chars         |     65526 |   10.47 ns |    9.81 ns |    9.12 ns |     1.27 |    0.21 ns |   70.35 ns |   70.13 ns |         10 |
+// | 1.2) Write Loop      |     65520 |   52.19 ns |   50.10 ns |    8.10 ns |     6.63 |   40.08 ns |  200.38 ns |  160.30 ns |         16 |
+// #========================================================================================================================================#
+// Searching took: 376.15 ms
+// [Expected] RNtuple search take 6.17 ms per 1M iters 
+// Total Rows: 59.41 M
+//   Rows per Thread: 4.95 M
+//     AVX512 per thread: 309.41 K
+
+
 #include <ROOT/RFieldBase.hxx>
 #include <ROOT/RNTupleModel.hxx>
 #include <ROOT/RNTupleTypes.hxx>
@@ -287,79 +365,3 @@ int main(){
   std::cout << std::endl;
 }
 
-// Min result over 5 runs (Outliers only exist in +side due to CPU interupts)
-// [Raw]             ~30ms per 1m rows single column search
-// [Thread]          ~ 7ms per 1m rows single column search
-// [Thread & AVX512] ~ 5ms per 1m rows single column search
-
-
-//TODO:
-//  -switch raw names to std::array<char, 4>
-//  -slice GPU decoding + unsync multithread for lightweight max speed
-
-//---------------------------------------------Use unordered_map to make it academically fast O(1) (slower in time)---------------------
-// 󰣇 codebase/cpp/Aladata ❯ g++ -std=c++20 -O3 -march=native -DRUN_O1SEARCH=1 find.cpp $(root-config --cflags --libs) && ./a.out                                                                                               14:41 
-// [14:41:07] Use O(1) search via unordered_map to search the name
-// [Sys] Found 4 users named: alice
-//    Within a database made of 59406880 users
-//  [User]: alice [Age]: 45
-//  [User]: alice [Age]: 19
-//  [User]: alice [Age]: 30
-//  [User]: alice [Age]: 61
-//
-// #========================================================================================================================================#
-// | LATTE TELEMETRY [TIME][RAW]                                                                                                            |
-// #========================================================================================================================================#
-// | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |     BYPASS |
-// |----------------------------------------------------------------------------------------------------------------------------------------|
-// | 2) Search            |         1 |     1.33 s |     1.33 s |    0.00 ns |     0.00 |     1.33 s |     1.33 s |    0.00 ns |          0 |
-// | 2.1) Search LoadInde |         1 |     1.33 s |     1.33 s |    0.00 ns |     0.00 |     1.33 s |     1.33 s |    0.00 ns |          0 |
-// | 2.2) Search find     |         1 |  361.41 us |  361.41 us |    0.00 ns |     0.00 |  361.41 us |  361.41 us |    0.00 ns |          0 |
-// | 3) Read              |         1 |   29.34 ms |   29.34 ms |    0.00 ns |     0.00 |   29.34 ms |   29.34 ms |    0.00 ns |          0 |
-// | 3.1) Read Init       |         1 |   23.10 us |   23.10 us |    0.00 ns |     0.00 |   23.10 us |   23.10 us |    0.00 ns |          0 |
-// | 3.2) Read Findings   |         3 |    5.58 ms |    6.25 ms |    1.82 ms |    -0.50 |    3.09 ms |    7.39 ms |    4.30 ms |          0 |
-// | 1) Write             |         1 |    40.15 s |    40.15 s |    0.00 ns |     0.00 |    40.15 s |    40.15 s |    0.00 ns |          0 |
-// | 1.1) Write init      |         1 |  114.12 ms |  114.12 ms |    0.00 ns |     0.00 |  114.12 ms |  114.12 ms |    0.00 ns |          0 |
-// | 0) Rng chars         |     65533 |  105.42 ns |    9.81 ns |  204.66 ns |     2.05 |    0.21 ns |    2.37 us |    2.37 us |          3 |
-// | 1.2) Write Loop      |     65532 |  530.47 ns |  510.96 ns |  170.56 ns |     3.83 |   70.13 ns |    5.11 us |    5.04 us |          4 |
-// | 1.3) Write SaveIndex |         1 |     2.12 s |     2.12 s |    0.00 ns |     0.00 |     2.12 s |     2.12 s |    0.00 ns |          0 |
-// | Global               |         1 |    45.43 s |    45.43 s |    0.00 ns |     0.00 |    45.43 s |    45.43 s |    0.00 ns |          0 |
-// #========================================================================================================================================#
-// Searching took: 1.33 s
-// [Expected] RNtuple search take 22.34 ms per 1M iters 
-// Total Rows: 59.41 M
-
-
-//------------------------------------------Iterative search MaxThread+AVX O(n) (Fast)
-// 󰣇 codebase/cpp/Aladata ❯ g++ -std=c++20 -O3 -march=native -DRUN_O1SEARCH=0 find.cpp $(root-config --cflags --libs) && ./a.out                                                                                               14:45 
-// [14:45:18] Use Iterative method with MaxThread + AVX512 to search the name
-// [Sys] Found 4 users named: alice
-//    Within a database made of 59406880 users
-//  [User]: alice [Age]: 45
-//  [User]: alice [Age]: 19
-//  [User]: alice [Age]: 30
-//  [User]: alice [Age]: 61
-//
-// #========================================================================================================================================#
-// | LATTE TELEMETRY [TIME][RAW]                                                                                                            |
-// #========================================================================================================================================#
-// | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |     BYPASS |
-// |----------------------------------------------------------------------------------------------------------------------------------------|
-// | 2) Search            |         1 |  376.86 ms |  376.86 ms |    0.00 ns |     0.00 |  376.86 ms |  376.86 ms |    0.00 ns |          0 |
-// | 2.1) Search Init     |         1 |  341.52 us |  341.52 us |    0.00 ns |     0.00 |  341.52 us |  341.52 us |    0.00 ns |          0 |
-// | 2.2) Search Loop     |         1 |  347.23 ms |  347.23 ms |    0.00 ns |     0.00 |  347.23 ms |  347.23 ms |    0.00 ns |          0 |
-// | 2.3) Search Thread   |        11 |   56.90 us |   48.41 us |   21.48 us |     0.36 |   26.91 us |   96.44 us |   69.53 us |          0 |
-// | 3) Read              |         1 |   29.23 ms |   29.23 ms |    0.00 ns |     0.00 |   29.23 ms |   29.23 ms |    0.00 ns |          0 |
-// | 3.1) Read Init       |         1 |   19.91 us |   19.91 us |    0.00 ns |     0.00 |   19.91 us |   19.91 us |    0.00 ns |          0 |
-// | 3.2) Read Findings   |         3 |    5.71 ms |    6.01 ms |    2.01 ms |    -0.22 |    3.11 ms |    8.00 ms |    4.89 ms |          0 |
-// | 2.4) Search AVX512   |    786427 |   10.33 ns |    9.81 ns |   28.84 ns |    12.89 |    0.21 ns |    1.50 us |    1.50 us |          5 |
-// | 1) Write             |         1 |    11.34 s |    11.34 s |    0.00 ns |     0.00 |    11.34 s |    11.34 s |    0.00 ns |          0 |
-// | 1.1) Write init      |         1 |  113.18 ms |  113.18 ms |    0.00 ns |     0.00 |  113.18 ms |  113.18 ms |    0.00 ns |          0 |
-// | 0) Rng chars         |     65526 |   10.47 ns |    9.81 ns |    9.12 ns |     1.27 |    0.21 ns |   70.35 ns |   70.13 ns |         10 |
-// | 1.2) Write Loop      |     65520 |   52.19 ns |   50.10 ns |    8.10 ns |     6.63 |   40.08 ns |  200.38 ns |  160.30 ns |         16 |
-// #========================================================================================================================================#
-// Searching took: 376.15 ms
-// [Expected] RNtuple search take 6.17 ms per 1M iters 
-// Total Rows: 59.41 M
-//   Rows per Thread: 4.95 M
-//     AVX512 per thread: 309.41 K
