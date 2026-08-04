@@ -1,6 +1,6 @@
 # FastSearch Bench over RNTuple
 
-Query `Search "alice"`, 59.4M rows, 4 matches, single thread, no shard.
+Query `Search "alice" in name`, 59.4M rows, 4 matches, single thread, no shard.
 
 ## Environment
 
