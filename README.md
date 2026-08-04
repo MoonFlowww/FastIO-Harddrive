@@ -23,7 +23,7 @@ Deltas under ~5% are not separable.
 | method | ms / 1M | telemetry search |
 |---|---|---|
 | `SIMD_fnv1a_Search` | 12.77 | 769.18 ms |
-| `NoSearch` | 16.38 | — |
+| `NoSearch` | 16.38 | - |
 | `SIMD_FSL_Search` | 16.81 | 1.01 s |
 | `ConstSearch` | 20.21 | 1.19 s |
 | `O1Search` | 1200 | 1.20 s (LoadIndex; find = 226.79 us) |
