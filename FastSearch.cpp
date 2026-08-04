@@ -1,7 +1,7 @@
 // Per 1M rows
 // O(1):              1.2 s 
-// avx512 fnv1a:      12.98 ms 
-// avx512 FSL:        16.81 ms
+// avx512 fnv1a:      12.98 ms (3    captures in bloom body) 
+// avx512 FSL:        16.81 ms (3275 captures in bloom body)
 // constsize O(1):    20.21 ms 
 
 
