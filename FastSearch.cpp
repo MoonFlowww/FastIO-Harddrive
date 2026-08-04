@@ -1,5 +1,5 @@
 // Per 1M rows
-// O(1):              20.00 ms 
+// O(1):              1.2 s 
 // avx512 fnv1a:      12.98 ms 
 // avx512 FSL:        16.81 ms
 // constsize O(1):    20.21 ms 
@@ -11,7 +11,7 @@
 
 
 
-// best optimization is compression = 401
+// best optimization is compression at 401
 
 
 
@@ -22,7 +22,7 @@
 //--------------------------------------------- Academically fast through unordered_map O(1) ---------------------
 /*
 ./bin/fastsearch_o1
-[19:14:47] Use O(1) via unordered_map
+[10:39:50] Use O(1) via unordered_map
 [Sys] Found 4 users named: alice
    Within a database made of 59406880 users
  [User]: alice [Age]: 45
@@ -37,25 +37,23 @@
 |----------------------------------------------------------------------------------------------------------------------------------------|
 | 2) Search            |         1 |     1.20 s |     1.20 s |    0.00 ns |     0.00 |     1.20 s |     1.20 s |    0.00 ns |          0 |
 | 2.1) Search LoadInde |         1 |     1.20 s |     1.20 s |    0.00 ns |     0.00 |     1.20 s |     1.20 s |    0.00 ns |          0 |
-| 2.2) Search find     |         1 |  435.67 us |  435.67 us |    0.00 ns |     0.00 |  435.67 us |  435.67 us |    0.00 ns |          0 |
-| 1) Write             |         1 |    27.90 s |    27.90 s |    0.00 ns |     0.00 |    27.90 s |    27.90 s |    0.00 ns |          0 |
-| 1.1) Write init      |         1 |   88.99 ms |   88.99 ms |    0.00 ns |     0.00 |   88.99 ms |   88.99 ms |    0.00 ns |          0 |
-| 0) Rng chars         |     65535 |   90.44 ns |    9.79 ns |  174.37 ns |     2.40 |    0.21 ns |    3.87 us |    3.87 us |          1 |
-| 1.2) Write Loop      |     65533 |  461.09 ns |  450.00 ns |  142.33 ns |     6.18 |   70.00 ns |    5.14 us |    5.07 us |          3 |
-| 1.3) Write SaveIndex |         1 |     1.77 s |     1.77 s |    0.00 ns |     0.00 |     1.77 s |     1.77 s |    0.00 ns |          0 |
-| 3) Read              |         1 |   23.64 ms |   23.64 ms |    0.00 ns |     0.00 |   23.64 ms |   23.64 ms |    0.00 ns |          0 |
-| 3.1) Read Init       |         1 |   22.25 us |   22.25 us |    0.00 ns |     0.00 |   22.25 us |   22.25 us |    0.00 ns |          0 |
-| 3.2) Read Findings   |         3 |    5.16 ms |    2.75 ms |    3.95 ms |     0.69 |    1.99 ms |   10.73 ms |    8.74 ms |          0 |
-| Global               |         1 |    32.24 s |    32.24 s |    0.00 ns |     0.00 |    32.24 s |    32.24 s |    0.00 ns |          0 |
+| 2.2) Search find     |         1 |  226.79 us |  226.79 us |    0.00 ns |     0.00 |  226.79 us |  226.79 us |    0.00 ns |          0 |
+| 1) Write             |         1 |    28.03 s |    28.03 s |    0.00 ns |     0.00 |    28.03 s |    28.03 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   88.09 ms |   88.09 ms |    0.00 ns |     0.00 |   88.09 ms |   88.09 ms |    0.00 ns |          0 |
+| 0) Rng chars         |     65535 |   92.61 ns |    9.79 ns |  176.18 ns |     2.26 |    0.21 ns |    3.82 us |    3.82 us |          1 |
+| 1.2) Write Loop      |     65530 |  467.11 ns |  450.00 ns |  139.53 ns |     5.02 |   70.00 ns |    5.07 us |    5.00 us |          6 |
+| 1.3) Write SaveIndex |         1 |     1.76 s |     1.76 s |    0.00 ns |     0.00 |     1.76 s |     1.76 s |    0.00 ns |          0 |
+| 3) Read              |         1 |   23.76 ms |   23.76 ms |    0.00 ns |     0.00 |   23.76 ms |   23.76 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   20.56 us |   20.56 us |    0.00 ns |     0.00 |   20.56 us |   20.56 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    5.24 ms |    2.58 ms |    4.21 ms |     0.70 |    1.97 ms |   11.19 ms |    9.22 ms |          0 |
+| Global               |         1 |    32.35 s |    32.35 s |    0.00 ns |     0.00 |    32.35 s |    32.35 s |    0.00 ns |          0 |
 #========================================================================================================================================#
 Searching took: 1.20 s
-[Expected] RNtuple search take 20.00 ms per 1M iters 
 Total Rows: 59.41 M
-*/
 
 /* -------------------------------------------- Iterative AVX512 + bloom(fnv1a) (single thread)
 ./bin/fastsearch_fnv1a
-[19:13:25] use Iterative AVX512 + fnv1a
+[10:38:19] use Iterative AVX512 + fnv1a
 [Sys] Found 4 users named: alice
    Within a database made of 59406880 users
  [User]: alice [Age]: 45
@@ -68,20 +66,22 @@ Total Rows: 59.41 M
 #========================================================================================================================================#
 | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |    OUTLIER |
 |----------------------------------------------------------------------------------------------------------------------------------------|
-| 2) Search            |         1 |  772.59 ms |  772.59 ms |    0.00 ns |     0.00 |  772.59 ms |  772.59 ms |    0.00 ns |          0 |
-| 2.1) SIMD body       |         1 |  771.74 ms |  771.74 ms |    0.00 ns |     0.00 |  771.74 ms |  771.74 ms |    0.00 ns |          0 |
-| 2.2) SIMD tail       |         1 |  618.77 us |  618.77 us |    0.00 ns |     0.00 |  618.77 us |  618.77 us |    0.00 ns |          0 |
-| 1) Write             |         1 |     3.88 s |     3.88 s |    0.00 ns |     0.00 |     3.88 s |     3.88 s |    0.00 ns |          0 |
-| 1.1) Write init      |         1 |   89.86 ms |   89.86 ms |    0.00 ns |     0.00 |   89.86 ms |   89.86 ms |    0.00 ns |          0 |
-| 0) Rng chars         |     65536 |   10.59 ns |    9.79 ns |    9.44 ns |     1.87 |    0.21 ns |  110.00 ns |  109.79 ns |          0 |
-| 1.2) Write Loop      |     65525 |   53.03 ns |   50.00 ns |   10.20 ns |     6.50 |   40.00 ns |  220.00 ns |  180.00 ns |         11 |
-| 3) Read              |         1 |   22.98 ms |   22.98 ms |    0.00 ns |     0.00 |   22.98 ms |   22.98 ms |    0.00 ns |          0 |
-| 3.1) Read Init       |         1 |   17.09 us |   17.09 us |    0.00 ns |     0.00 |   17.09 us |   17.09 us |    0.00 ns |          0 |
-| 3.2) Read Findings   |         3 |    5.13 ms |    2.61 ms |    4.05 ms |     0.69 |    1.94 ms |   10.84 ms |    8.90 ms |          0 |
-| Global               |         1 |     4.81 s |     4.81 s |    0.00 ns |     0.00 |     4.81 s |     4.81 s |    0.00 ns |          0 |
+| 2) Search            |         1 |  769.18 ms |  769.18 ms |    0.00 ns |     0.00 |  769.18 ms |  769.18 ms |    0.00 ns |          0 |
+| 2.1) SIMD body       |         1 |  768.33 ms |  768.33 ms |    0.00 ns |     0.00 |  768.33 ms |  768.33 ms |    0.00 ns |          0 |
+| 2.1.1) unroll bloom  |         3 |  176.32 ms |  190.46 ms |  135.89 ms |    -0.15 |    3.27 ms |  335.23 ms |  331.96 ms |          0 |
+| 2.2) SIMD tail       |         1 |  630.11 us |  630.11 us |    0.00 ns |     0.00 |  630.11 us |  630.11 us |    0.00 ns |          0 |
+| 2.2.1) Tail          |        47 |   13.18 us |   10.00 ns |   89.27 us |     6.63 |   10.00 ns |  618.61 us |  618.60 us |          0 |
+| 1) Write             |         1 |     3.86 s |     3.86 s |    0.00 ns |     0.00 |     3.86 s |     3.86 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   90.36 ms |   90.36 ms |    0.00 ns |     0.00 |   90.36 ms |   90.36 ms |    0.00 ns |          0 |
+| 0) Rng chars         |     65534 |   10.52 ns |    9.79 ns |    9.41 ns |     1.84 |    0.21 ns |  100.00 ns |   99.79 ns |          2 |
+| 1.2) Write Loop      |     65525 |   52.58 ns |   50.00 ns |    9.89 ns |     6.94 |   40.00 ns |  220.00 ns |  180.00 ns |         11 |
+| 3) Read              |         1 |   23.27 ms |   23.27 ms |    0.00 ns |     0.00 |   23.27 ms |   23.27 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   17.47 us |   17.47 us |    0.00 ns |     0.00 |   17.47 us |   17.47 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    5.27 ms |    2.62 ms |    4.23 ms |     0.69 |    1.94 ms |   11.24 ms |    9.30 ms |          0 |
+| Global               |         1 |     4.79 s |     4.79 s |    0.00 ns |     0.00 |     4.79 s |     4.79 s |    0.00 ns |          0 |
 #========================================================================================================================================#
-Searching took: 772.59 ms
-[Expected] RNtuple search take 12.98 ms per 1M iters 
+Searching took: 769.18 ms
+[Expected] RNtuple search take 12.77 ms per 1M iters 
 Total Rows: 59.41 M
 */
 
@@ -90,7 +90,7 @@ Total Rows: 59.41 M
 
 /* ---------------------------------------------------Iterative AVX512 + bloom(First, Second and Last char) (single thread)
 ./bin/fastsearch_fsl
-[19:08:31] use Iterative AVX512 + FSL to search the name
+[10:36:53] use Iterative AVX512 + FSL
 [Sys] Found 4 users named: alice
    Within a database made of 59406880 users
  [User]: alice [Age]: 45
@@ -105,15 +105,17 @@ Total Rows: 59.41 M
 |----------------------------------------------------------------------------------------------------------------------------------------|
 | 2) Search            |         1 |     1.01 s |     1.01 s |    0.00 ns |     0.00 |     1.01 s |     1.01 s |    0.00 ns |          0 |
 | 2.1) SIMD body       |         1 |     1.01 s |     1.01 s |    0.00 ns |     0.00 |     1.01 s |     1.01 s |    0.00 ns |          0 |
-| 2.2) SIMD tail       |         1 |  570.00 ns |  570.00 ns |    0.00 ns |     0.00 |  570.00 ns |  570.00 ns |    0.00 ns |          0 |
-| 1) Write             |         1 |     3.88 s |     3.88 s |    0.00 ns |     0.00 |     3.88 s |     3.88 s |    0.00 ns |          0 |
-| 1.1) Write init      |         1 |   87.49 ms |   87.49 ms |    0.00 ns |     0.00 |   87.49 ms |   87.49 ms |    0.00 ns |          0 |
-| 0) Rng chars         |     65535 |   10.57 ns |    9.79 ns |    9.46 ns |     1.89 |    0.21 ns |  110.00 ns |  109.79 ns |          1 |
-| 1.2) Write Loop      |     65527 |   53.14 ns |   50.00 ns |   10.32 ns |     6.69 |   40.00 ns |  270.00 ns |  230.00 ns |          9 |
-| 3) Read              |         1 |   22.81 ms |   22.81 ms |    0.00 ns |     0.00 |   22.81 ms |   22.81 ms |    0.00 ns |          0 |
-| 3.1) Read Init       |         1 |   17.39 us |   17.39 us |    0.00 ns |     0.00 |   17.39 us |   17.39 us |    0.00 ns |          0 |
-| 3.2) Read Findings   |         3 |    5.00 ms |    2.57 ms |    3.85 ms |     0.70 |    1.99 ms |   10.43 ms |    8.44 ms |          0 |
-| Global               |         1 |     5.04 s |     5.04 s |    0.00 ns |     0.00 |     5.04 s |     5.04 s |    0.00 ns |          0 |
+| 2.1.1) unroll bloom  |      3275 |  305.41 us |  159.83 us |  369.58 us |     1.98 |   10.00 ns |    2.87 ms |    2.87 ms |          0 |
+| 2.2) SIMD tail       |         1 |    4.99 us |    4.99 us |    0.00 ns |     0.00 |    4.99 us |    4.99 us |    0.00 ns |          0 |
+| 2.2.1) Tail          |        31 |   23.55 ns |   20.00 ns |   43.59 ns |     5.13 |   10.00 ns |  260.00 ns |  250.00 ns |          0 |
+| 1) Write             |         1 |     3.85 s |     3.85 s |    0.00 ns |     0.00 |     3.85 s |     3.85 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   88.78 ms |   88.78 ms |    0.00 ns |     0.00 |   88.78 ms |   88.78 ms |    0.00 ns |          0 |
+| 0) Rng chars         |     65531 |   10.63 ns |    9.79 ns |    9.55 ns |     1.81 |    0.21 ns |  110.21 ns |  110.00 ns |          5 |
+| 1.2) Write Loop      |     65524 |   53.23 ns |   50.00 ns |   10.24 ns |     6.84 |   40.00 ns |  300.00 ns |  260.00 ns |         12 |
+| 3) Read              |         1 |   22.85 ms |   22.85 ms |    0.00 ns |     0.00 |   22.85 ms |   22.85 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   19.40 us |   19.40 us |    0.00 ns |     0.00 |   19.40 us |   19.40 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    5.20 ms |    2.65 ms |    4.12 ms |     0.69 |    1.95 ms |   11.01 ms |    9.06 ms |          0 |
+| Global               |         1 |     5.01 s |     5.01 s |    0.00 ns |     0.00 |     5.01 s |     5.01 s |    0.00 ns |          0 |
 #========================================================================================================================================#
 Searching took: 1.01 s
 [Expected] RNtuple search take 16.81 ms per 1M iters 
@@ -124,7 +126,7 @@ Total Rows: 59.41 M
 
 /* --------------------------------------- Iterative memcmp for const size (single thread) O(n)
 ./bin/fastsearch_const
-[19:07:02] Use Iterative const size to search the name
+[10:41:11] use Iterative const size
 [Sys] Found 4 users named: alice
    Within a database made of 59406880 users
  [User]: alice [Age]: 45
@@ -137,20 +139,73 @@ Total Rows: 59.41 M
 #========================================================================================================================================#
 | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |    OUTLIER |
 |----------------------------------------------------------------------------------------------------------------------------------------|
-| 2) Search            |         1 |     1.20 s |     1.20 s |    0.00 ns |     0.00 |     1.20 s |     1.20 s |    0.00 ns |          0 |
-| 1) Write             |         1 |     3.86 s |     3.86 s |    0.00 ns |     0.00 |     3.86 s |     3.86 s |    0.00 ns |          0 |
-| 1.1) Write init      |         1 |   88.50 ms |   88.50 ms |    0.00 ns |     0.00 |   88.50 ms |   88.50 ms |    0.00 ns |          0 |
-| 0) Rng chars         |     65535 |   10.62 ns |    9.79 ns |    9.52 ns |     1.91 |    0.21 ns |  110.00 ns |  109.79 ns |          1 |
-| 1.2) Write Loop      |     65519 |   53.24 ns |   50.00 ns |   10.54 ns |     6.10 |   40.00 ns |  210.00 ns |  170.00 ns |         17 |
-| 3) Read              |         1 |   23.28 ms |   23.28 ms |    0.00 ns |     0.00 |   23.28 ms |   23.28 ms |    0.00 ns |          0 |
-| 3.1) Read Init       |         1 |   19.58 us |   19.58 us |    0.00 ns |     0.00 |   19.58 us |   19.58 us |    0.00 ns |          0 |
-| 3.2) Read Findings   |         3 |    5.12 ms |    2.68 ms |    3.97 ms |     0.69 |    1.95 ms |   10.72 ms |    8.77 ms |          0 |
-| Global               |         1 |     5.22 s |     5.22 s |    0.00 ns |     0.00 |     5.22 s |     5.22 s |    0.00 ns |          0 |
+| 2) Search            |         1 |     1.19 s |     1.19 s |    0.00 ns |     0.00 |     1.19 s |     1.19 s |    0.00 ns |          0 |
+| 1) Write             |         1 |     3.85 s |     3.85 s |    0.00 ns |     0.00 |     3.85 s |     3.85 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   88.98 ms |   88.98 ms |    0.00 ns |     0.00 |   88.98 ms |   88.98 ms |    0.00 ns |          0 |
+| 0) Rng chars         |     65533 |   10.63 ns |    9.79 ns |    9.54 ns |     1.87 |    0.21 ns |  100.00 ns |   99.79 ns |          3 |
+| 1.2) Write Loop      |     65527 |   52.85 ns |   50.00 ns |   10.49 ns |     7.00 |   40.00 ns |  310.00 ns |  270.00 ns |          9 |
+| 3) Read              |         1 |   22.89 ms |   22.89 ms |    0.00 ns |     0.00 |   22.89 ms |   22.89 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   17.74 us |   17.74 us |    0.00 ns |     0.00 |   17.74 us |   17.74 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    5.24 ms |    2.59 ms |    4.21 ms |     0.69 |    1.94 ms |   11.18 ms |    9.24 ms |          0 |
+| Global               |         1 |     5.19 s |     5.19 s |    0.00 ns |     0.00 |     5.19 s |     5.19 s |    0.00 ns |          0 |
 #========================================================================================================================================#
-Searching took: 1.20 s
-[Expected] RNtuple search take 20.21 ms per 1M iters 
+Searching took: 1.19 s
+[Expected] RNtuple search take 19.79 ms per 1M iters 
 Total Rows: 59.41 M
 */
+
+
+
+/*
+󰣇 experiments/training/FastIO-Harddrive   main  !? ❯ watchcub status
+
+== CPU ==
+  AMD Ryzen 5 7600X 6-Core Processor
+  Online CPUs                                  0-11
+  SMT control                                  on
+  cpufreq driver                               amd-pstate-epp
+  amd_pstate mode                              active
+  amd_pstate prefcore                          enabled
+  policy0    gov=performance cur=5226390   range=[5457105..5457105] boost=1 epp=performance
+  policy1    gov=performance cur=4640971   range=[5457105..5457105] boost=1 epp=performance
+  policy10   gov=performance cur=4757589   range=[5457105..5457105] boost=1 epp=performance
+  policy11   gov=performance cur=5358419   range=[5457105..5457105] boost=1 epp=performance
+  policy2    gov=performance cur=5414149   range=[5457105..5457105] boost=1 epp=performance
+  policy3    gov=performance cur=4419692   range=[5457105..5457105] boost=1 epp=performance
+  policy4    gov=performance cur=4339627   range=[5457105..5457105] boost=1 epp=performance
+  policy5    gov=performance cur=4355093   range=[5457105..5457105] boost=1 epp=performance
+  policy6    gov=performance cur=4396619   range=[5457105..5457105] boost=1 epp=performance
+  policy7    gov=performance cur=5203270   range=[5457105..5457105] boost=1 epp=performance
+  policy8    gov=performance cur=4319628   range=[5457105..5457105] boost=1 epp=performance
+  policy9    gov=performance cur=5191852   range=[5457105..5457105] boost=1 epp=performance
+
+== Turbo / boost (global) ==
+  cpufreq boost                                1
+
+== Kernel / memory ==
+  vm.swappiness                                1
+  kernel.numa_balancing                        0
+  kernel.randomize_va_space                    0
+  kernel.nmi_watchdog                          0
+  THP enabled                                  [always] madvise never
+  THP defrag                                   always defer defer+madvise madvise [never]
+
+== Tracing sysctls ==
+  kernel.perf_event_paranoid                   2
+  kernel.kptr_restrict                         0
+  kernel.yama.ptrace_scope                     1
+
+== Thermal ==
+  hottest sensor                               59C
+
+== NVIDIA GPU ==
+  0, NVIDIA GeForce RTX 4070 Ti, Enabled, 2805 MHz, 285.00 W
+
+== AMD GPU ==
+  /sys/class/drm/card0/device/power_dpm_force_performance_level high
+
+*/
+
 #include <ROOT/RFieldBase.hxx>
 #include <ROOT/RNTupleModel.hxx>
 #include <ROOT/RNTupleTypes.hxx>
@@ -158,7 +213,6 @@ Total Rows: 59.41 M
 #include <ROOT/RNTupleWriter.hxx>
 #include <ROOT/RNTupleReader.hxx>
 #include <TDictionary.h>
-#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -333,6 +387,7 @@ SearchResult SIMD_FSL_Search(const std::string& tName){
     uint64_t mask = eq1 & eq2 & eq3;
 
     while(mask){ // unroll mask to save bloomed
+      LATTE_PULSE("2.1.1) unroll bloom");
       uint32_t j = __builtin_ctzll(mask);
       if(std::memcmp(tName.data(), vName(v+j).data(), tName.size())==0) matches.push_back(v+j);
       mask &= mask-1;
@@ -343,6 +398,7 @@ SearchResult SIMD_FSL_Search(const std::string& tName){
   Latte::Fast::Start("2.2) SIMD tail");
   
   for(; v<nEntries;++v){ // v tail (no bloom)
+    LATTE_PULSE("2.2.1) Tail");
     if(std::memcmp(tName.data(), vName(v).data(), tName.size())==0) matches.push_back(v);
   }
 
@@ -378,6 +434,7 @@ SearchResult SIMD_fnv1a_Search(const std::string& tName){
     uint64_t mask = _mm512_cmpeq_epi32_mask(tar_hashed, vcan_hashed);
 
     while(mask){ // unroll mask to save bloomed
+      LATTE_PULSE("2.1.1) unroll bloom");
       uint32_t j = __builtin_ctzll(mask);
       if(std::memcmp(tName.data(), vName(v+j).data(), tName.size())==0) matches.push_back(v+j);
       mask &= mask-1;
@@ -389,6 +446,7 @@ SearchResult SIMD_fnv1a_Search(const std::string& tName){
   Latte::Fast::Start("2.2) SIMD tail");
   
   for(; v<nEntries;++v){ // v tail (no bloom)
+    LATTE_PULSE("2.2.1) Tail");
     if(std::memcmp(tName.data(), vName(v).data(), tName.size())==0) matches.push_back(v);
   }
 

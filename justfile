@@ -91,4 +91,4 @@ run: run-o1 run-fsl run-fnv1a run-const run-nosearch
 clean:
     rm -rf {{bindir}} {{data}}
     @echo "cleaned {{bindir}}/ and {{data}}/"
-    @echo "\n"
+    @echo ""
