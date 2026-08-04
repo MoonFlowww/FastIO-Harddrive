@@ -123,4 +123,4 @@ TODO:
 - std::array<char, 5> instead of string as name
 - consumer ID
 - gpu slice deconding
-- sharding: `SHARD_MAP(hash % BIG_N) -> shard id` (`_ % BIG_N` is here to scale; if new shard necessary we can just cut one shard into subs, and update the lookup table; BIG_N > Shards)
+- sharding: `SHARD_MAP(hash % BIG_N) -> shard id` (`_ % BIG_N` is here to scale; if new shard necessary, we can just cut one into subs, and update the lookup table; BIG_N > Shards)
