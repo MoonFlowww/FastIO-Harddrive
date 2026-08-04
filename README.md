@@ -28,7 +28,8 @@ Deltas under ~5% are not separable.
 | `ConstSearch` | 20.21 | 1.19 s |
 | `O1Search` | 1200 | 1.20 s (LoadIndex; find = 226.79 us) |
 
-> if we can keep umap in ram, it is the fastest, unfortunately it scale poorly ...
+
+>  if we can keep umap in ram, it is the fastest, unfortunately it scale poorly ...
 
 ## perf stat, whole program
 
