@@ -93,14 +93,14 @@ vHashName(v+j)
 ## Methods
 
 ```
-SIMD_fnv1a_Search                          12.77 ms/1M   3 captures
+SIMD_fnv1a_Search                          12.77 ms/1M   3 bloom captures
   for v in steps of 16:
       load hash_name[v..v+16] -> __m512i
       mask = cmpeq_epi32(target_hash, vec)
       while mask: j=ctz(mask); memcmp confirm; mask &= mask-1
   tail: scalar memcmp
 
-SIMD_FSL_Search                            16.81 ms/1M   3275 captures
+SIMD_FSL_Search                            16.81 ms/1M   3275 bloom captures
   for v in steps of 64:
       gather byte[0], byte[1], byte[len-1] of 64 names -> 3 scratch arrays
       mask = cmpeq8(f) & cmpeq8(s) & cmpeq8(l)
