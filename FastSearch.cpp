@@ -356,7 +356,7 @@ struct SearchResult{
   char tName[name_len]; // human readable name
 
   SearchResult(std::unique_ptr<ROOT::RNTupleReader> r, std::vector<uint64_t> m, const char (&n)[name_len])
-    : reader(std::move(r)), matches(std::move(m)) {
+  : reader(std::move(r)), matches(std::move(m)) {
     std::memcpy(tName, n, name_len);
   }
   SearchResult() = default;
@@ -564,7 +564,7 @@ auto NoSearchHash(const char (&tName)[name_len]) -> SearchResult {
 void read(SearchResult& Sresult){
   Latte::Mid::Start("3) Read");
   Latte::Fast::Start("3.1) Read Init");
-  auto vName = Sresult.reader->GetView<std::array<char, name_len>>("name");
+  auto vName = Sresult.reader->GetDirectAccessView<std::array<char, name_len>>("name");
   auto vAge = Sresult.reader->GetDirectAccessView<int>("age");
   Latte::Fast::Stop("3.1) Read Init");
   std::cout 
