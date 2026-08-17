@@ -13,7 +13,7 @@ Per 1M rows, current build (`GetDirectAccessView` + fixed-size `char[5]` names):
 | `NoSearch` (raw `char[5]` iteration) | 9.15 | 538.14 ms |
 | `SIMD_FSL_Search` | 10.43 | 625.84 ms |
 | `ConstSearch` | 11.06 | 670.86 ms |
-| `O1Search` | load: 1.24 s || O1find: 18.24 ms | O(1) |
+| `O1Search` | load: 1.24 s // O1find: 18.24 ms | O(1) |
 
 Notes:
 
