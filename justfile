@@ -24,7 +24,7 @@ info:
     @echo "root     : $$(root-config --version)"
     @lscpu | grep -E "Model name|^Socket|^NUMA" || true
 
-build: build-o1 build-fsl build-fnv1a build-const build-nosearch
+build: build-o1 build-fsl build-fnv1a build-const build-nosearch build-nosearchhash
     @echo "DONE all variants built into {{bindir}}/"
     @echo ""
 
@@ -48,14 +48,20 @@ build-fnv1a:
 
 build-const:
     mkdir -p {{bindir}} {{data}}
-    g++ -std=c++20 {{hpc}} -DRUN_CONSTSEACH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_const
+    g++ -std=c++20 {{hpc}} -DRUN_CONSTSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_const
     @echo "DONE {{bindir}}/{{name}}_static [const name size memcmp search]"
     @echo ""
 
 build-nosearch:
     mkdir -p {{bindir}} {{data}}
     g++ -std=c++20 {{hpc}} -DRUN_NOSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_nosearch
-    @echo "DONE {{bindir}}/{{name}}_nosearch [no search, cost baseline]"
+    @echo "DONE {{bindir}}/{{name}}_nosearch [no search char[5], cost baseline]"
+    @echo ""
+
+build-nosearchhash:
+    mkdir -p {{bindir}} {{data}}
+    g++ -std=c++20 {{hpc}} -DRUN_NOSEARCHHASH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_nosearchhash
+    @echo "DONE {{bindir}}/{{name}}_nosearchhash [no search uint32_t, cost baseline]"
     @echo ""
 
 
@@ -81,12 +87,17 @@ run-const: build-const
     @echo ""
 
 run-nosearch: build-nosearch
-    @echo "running baseline cost of iteration"
+    @echo "running baseline cost of iteration over char[5]"
     ./{{bindir}}/{{name}}_nosearch
     @echo ""
 
+run-nosearchhash: build-nosearchhash
+    @echo "running baseline cost of iteration over uint32_t"
+    ./{{bindir}}/{{name}}_nosearchhash
+    @echo ""
 
-run: run-o1 run-fsl run-fnv1a run-const run-nosearch
+
+run: run-o1 run-fsl run-fnv1a run-const run-nosearch run-nosearchhash
 
 clean:
     rm -rf {{bindir}} {{data}}

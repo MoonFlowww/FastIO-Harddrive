@@ -1,11 +1,12 @@
 // Per 1M rows
-// O(1):              1.2 s 
-// avx512 fnv1a:      12.98 ms (3    captures in bloom body) 
-// avx512 FSL:        16.81 ms (3275 captures in bloom body)
-// constsize O(1):    20.21 ms 
+// O(1):              load: 1.24 s || search: 18.24ms
+// avx512 fnv1a:      4.89 ms  (   3 captures in bloom body, use GetDirectAccessView since hash is fixed size) 
+// avx512 FSL:        10.43 ms (3275 captures in bloom body)
+// constsize O(1):    11.06 ms 
 
 
-// Raw iterations:    16.38 ms 
+// Raw Iterations Char[5]:    9.15 ms 
+// Raw Iter Hash<uint32_t>:   4.47 ms
 //PS: AVX512-based use mask+ctz, vectorized search doesnt iterate over all of rows
 //Reason why fnv1a is faster than iterations w/out logic
 
@@ -17,7 +18,8 @@
 
 //TODO:
 //  -slice GPU decoding + unsync multithread for lightweight max speed
-//  - use std::array<char, 5> instead of string as name, if fixed size known
+//  - name column stays std::array<char,5> inside RNTuple (fixed-size array column);
+//    all search-side arrays are plain char[name_len]
 
 //--------------------------------------------- Academically fast through unordered_map O(1) ---------------------
 /*
@@ -53,7 +55,8 @@ Total Rows: 59.41 M
 
 /* -------------------------------------------- Iterative AVX512 + bloom(fnv1a) (single thread)
 ./bin/fastsearch_fnv1a
-[10:55:22] use Iterative AVX512 + fnv1a
+[16:55:00] use Iterative AVX512 + fnv1a
+Warning in <ROOT_TImplicitMT_DisableImplicitMT>: Implicit multi-threading is already disabled
 [Sys] Found 4 users named: alice
    Within a database made of 59406880 users
  [User]: alice [Age]: 45
@@ -66,21 +69,21 @@ Total Rows: 59.41 M
 #========================================================================================================================================#
 | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |    OUTLIER |
 |----------------------------------------------------------------------------------------------------------------------------------------|
-| 2) Search            |         1 |  781.97 ms |  781.97 ms |    0.00 ns |     0.00 |  781.97 ms |  781.97 ms |    0.00 ns |          0 |
-| 2.1) SIMD body       |         1 |  781.74 ms |  781.74 ms |    0.00 ns |     0.00 |  781.74 ms |  781.74 ms |    0.00 ns |          0 |
-| 2.1.1) unroll bloom  |         3 |  180.47 ms |  197.09 ms |  138.34 ms |    -0.18 |    3.34 ms |  340.97 ms |  337.63 ms |          0 |
-| 2.2) SIMD tail       |         1 |   50.00 ns |   50.00 ns |    0.00 ns |     0.00 |   50.00 ns |   50.00 ns |    0.00 ns |          0 |
-| 1) Write             |         1 |     3.89 s |     3.89 s |    0.00 ns |     0.00 |     3.89 s |     3.89 s |    0.00 ns |          0 |
-| 1.1) Write init      |         1 |   91.19 ms |   91.19 ms |    0.00 ns |     0.00 |   91.19 ms |   91.19 ms |    0.00 ns |          0 |
-| 0) Rng chars         |     65536 |   10.37 ns |    9.79 ns |    9.38 ns |     1.83 |    0.21 ns |  110.00 ns |  109.79 ns |          0 |
-| 1.2) Write Loop      |     65513 |   52.74 ns |   50.00 ns |   10.31 ns |     5.99 |   40.00 ns |  180.00 ns |  140.00 ns |         23 |
-| 3) Read              |         1 |   23.04 ms |   23.04 ms |    0.00 ns |     0.00 |   23.04 ms |   23.04 ms |    0.00 ns |          0 |
-| 3.1) Read Init       |         1 |   16.50 us |   16.50 us |    0.00 ns |     0.00 |   16.50 us |   16.50 us |    0.00 ns |          0 |
-| 3.2) Read Findings   |         3 |    5.08 ms |    2.88 ms |    3.79 ms |     0.67 |    1.95 ms |   10.41 ms |    8.47 ms |          0 |
-| Global               |         1 |     4.83 s |     4.83 s |    0.00 ns |     0.00 |     4.83 s |     4.83 s |    0.00 ns |          0 |
+| 2) Search            |         1 |  302.13 ms |  302.13 ms |    0.00 ns |     0.00 |  302.13 ms |  302.13 ms |    0.00 ns |          0 |
+| 2.1) SIMD body       |         1 |  296.96 ms |  296.96 ms |    0.00 ns |     0.00 |  296.96 ms |  296.96 ms |    0.00 ns |          0 |
+| 2.1.1) unroll bloom  |         3 |   67.19 ms |   72.35 ms |   51.31 ms |    -0.15 |    1.93 ms |  127.29 ms |  125.35 ms |          0 |
+| 2.2) SIMD tail       |         1 |    0.21 ns |    0.21 ns |    0.00 ns |     0.00 |    0.21 ns |    0.21 ns |    0.00 ns |          0 |
+| 1) Write             |         1 |     4.03 s |     4.03 s |    0.00 ns |     0.00 |     4.03 s |     4.03 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   88.71 ms |   88.71 ms |    0.00 ns |     0.00 |   88.71 ms |   88.71 ms |    0.00 ns |          0 |
+| 1.2) Write Loop      |     65525 |   55.01 ns |   50.00 ns |   10.53 ns |     5.70 |   50.00 ns |  220.00 ns |  170.00 ns |         11 |
+| 0) Rng chars         |     65535 |   10.98 ns |    9.79 ns |   10.05 ns |     1.75 |    0.21 ns |  120.00 ns |  119.79 ns |          1 |
+| 3) Read              |         1 |   23.46 ms |   23.46 ms |    0.00 ns |     0.00 |   23.46 ms |   23.46 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   16.21 us |   16.21 us |    0.00 ns |     0.00 |   16.21 us |   16.21 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    5.29 ms |    2.94 ms |    4.03 ms |     0.68 |    1.96 ms |   10.97 ms |    9.01 ms |          0 |
+| Global               |         1 |     4.48 s |     4.48 s |    0.00 ns |     0.00 |     4.48 s |     4.48 s |    0.00 ns |          0 |
 #========================================================================================================================================#
-Searching took: 781.97 ms
-[Expected] RNtuple search take 12.98 ms per 1M iters 
+Searching took: 302.13 ms
+[Expected] RNtuple search take 4.89 ms per 1M iters 
 Total Rows: 59.41 M
 */
 
@@ -89,7 +92,8 @@ Total Rows: 59.41 M
 
 /* ---------------------------------------------------Iterative AVX512 + bloom(First, Second and Last char) (single thread)
 ./bin/fastsearch_fsl
-[10:36:53] use Iterative AVX512 + FSL
+[17:40:00] use Iterative AVX512 + FSL
+Warning in <ROOT_TImplicitMT_DisableImplicitMT>: Implicit multi-threading is already disabled
 [Sys] Found 4 users named: alice
    Within a database made of 59406880 users
  [User]: alice [Age]: 45
@@ -102,22 +106,22 @@ Total Rows: 59.41 M
 #========================================================================================================================================#
 | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |    OUTLIER |
 |----------------------------------------------------------------------------------------------------------------------------------------|
-| 2) Search            |         1 |     1.01 s |     1.01 s |    0.00 ns |     0.00 |     1.01 s |     1.01 s |    0.00 ns |          0 |
-| 2.1) SIMD body       |         1 |     1.01 s |     1.01 s |    0.00 ns |     0.00 |     1.01 s |     1.01 s |    0.00 ns |          0 |
-| 2.1.1) unroll bloom  |      3275 |  305.41 us |  159.83 us |  369.58 us |     1.98 |   10.00 ns |    2.87 ms |    2.87 ms |          0 |
-| 2.2) SIMD tail       |         1 |    4.99 us |    4.99 us |    0.00 ns |     0.00 |    4.99 us |    4.99 us |    0.00 ns |          0 |
-| 2.2.1) Tail          |        31 |   23.55 ns |   20.00 ns |   43.59 ns |     5.13 |   10.00 ns |  260.00 ns |  250.00 ns |          0 |
-| 1) Write             |         1 |     3.85 s |     3.85 s |    0.00 ns |     0.00 |     3.85 s |     3.85 s |    0.00 ns |          0 |
-| 1.1) Write init      |         1 |   88.78 ms |   88.78 ms |    0.00 ns |     0.00 |   88.78 ms |   88.78 ms |    0.00 ns |          0 |
-| 0) Rng chars         |     65531 |   10.63 ns |    9.79 ns |    9.55 ns |     1.81 |    0.21 ns |  110.21 ns |  110.00 ns |          5 |
-| 1.2) Write Loop      |     65524 |   53.23 ns |   50.00 ns |   10.24 ns |     6.84 |   40.00 ns |  300.00 ns |  260.00 ns |         12 |
-| 3) Read              |         1 |   22.85 ms |   22.85 ms |    0.00 ns |     0.00 |   22.85 ms |   22.85 ms |    0.00 ns |          0 |
-| 3.1) Read Init       |         1 |   19.40 us |   19.40 us |    0.00 ns |     0.00 |   19.40 us |   19.40 us |    0.00 ns |          0 |
-| 3.2) Read Findings   |         3 |    5.20 ms |    2.65 ms |    4.12 ms |     0.69 |    1.95 ms |   11.01 ms |    9.06 ms |          0 |
-| Global               |         1 |     5.01 s |     5.01 s |    0.00 ns |     0.00 |     5.01 s |     5.01 s |    0.00 ns |          0 |
+| 2) Search            |         1 |  623.22 ms |  623.22 ms |    0.00 ns |     0.00 |  623.22 ms |  623.22 ms |    0.00 ns |          0 |
+| 2.1) SIMD body       |         1 |  618.11 ms |  618.11 ms |    0.00 ns |     0.00 |  618.11 ms |  618.11 ms |    0.00 ns |          0 |
+| 2.1.1) unroll bloom  |      3275 |  186.63 us |  130.95 us |  188.29 us |     2.16 |   10.00 ns |    1.80 ms |    1.80 ms |          0 |
+| 2.2) SIMD tail       |         1 |   12.49 us |   12.49 us |    0.00 ns |     0.00 |   12.49 us |   12.49 us |    0.00 ns |          0 |
+| 2.2.1) Tail          |        31 |   22.26 ns |   10.00 ns |   51.22 ns |     5.13 |    0.21 ns |  300.00 ns |  299.79 ns |          0 |
+| 3) Read              |         1 |   25.90 ms |   25.90 ms |    0.00 ns |     0.00 |   25.90 ms |   25.90 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   27.25 us |   27.25 us |    0.00 ns |     0.00 |   27.25 us |   27.25 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    5.49 ms |    5.13 ms |    4.64 ms |     0.12 |    1.72 us |   11.34 ms |   11.34 ms |          0 |
+| 1) Write             |         1 |     3.63 s |     3.63 s |    0.00 ns |     0.00 |     3.63 s |     3.63 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   87.18 ms |   87.18 ms |    0.00 ns |     0.00 |   87.18 ms |   87.18 ms |    0.00 ns |          0 |
+| 1.2) Write Loop      |     65534 |   51.46 ns |   50.00 ns |   33.83 ns |    54.37 |   40.00 ns |    3.68 us |    3.64 us |          2 |
+| 0) Rng chars         |     65522 |   10.22 ns |    9.79 ns |    9.53 ns |     8.89 |    0.21 ns |  710.21 ns |  710.00 ns |         14 |
+| Global               |         1 |     4.42 s |     4.42 s |    0.00 ns |     0.00 |     4.42 s |     4.42 s |    0.00 ns |          0 |
 #========================================================================================================================================#
-Searching took: 1.01 s
-[Expected] RNtuple search take 16.81 ms per 1M iters 
+Searching took: 623.22 ms
+[Expected] RNtuple search take 10.43 ms per 1M iters 
 Total Rows: 59.41 M
 */
 
@@ -125,7 +129,8 @@ Total Rows: 59.41 M
 
 /* --------------------------------------- Iterative memcmp for const size (single thread) O(n)
 ./bin/fastsearch_const
-[10:41:11] use Iterative const size
+[17:40:48] use Iterative const size
+Warning in <ROOT_TImplicitMT_DisableImplicitMT>: Implicit multi-threading is already disabled
 [Sys] Found 4 users named: alice
    Within a database made of 59406880 users
  [User]: alice [Age]: 45
@@ -138,26 +143,24 @@ Total Rows: 59.41 M
 #========================================================================================================================================#
 | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |    OUTLIER |
 |----------------------------------------------------------------------------------------------------------------------------------------|
-| 2) Search            |         1 |     1.19 s |     1.19 s |    0.00 ns |     0.00 |     1.19 s |     1.19 s |    0.00 ns |          0 |
-| 1) Write             |         1 |     3.85 s |     3.85 s |    0.00 ns |     0.00 |     3.85 s |     3.85 s |    0.00 ns |          0 |
-| 1.1) Write init      |         1 |   88.98 ms |   88.98 ms |    0.00 ns |     0.00 |   88.98 ms |   88.98 ms |    0.00 ns |          0 |
-| 0) Rng chars         |     65533 |   10.63 ns |    9.79 ns |    9.54 ns |     1.87 |    0.21 ns |  100.00 ns |   99.79 ns |          3 |
-| 1.2) Write Loop      |     65527 |   52.85 ns |   50.00 ns |   10.49 ns |     7.00 |   40.00 ns |  310.00 ns |  270.00 ns |          9 |
-| 3) Read              |         1 |   22.89 ms |   22.89 ms |    0.00 ns |     0.00 |   22.89 ms |   22.89 ms |    0.00 ns |          0 |
-| 3.1) Read Init       |         1 |   17.74 us |   17.74 us |    0.00 ns |     0.00 |   17.74 us |   17.74 us |    0.00 ns |          0 |
-| 3.2) Read Findings   |         3 |    5.24 ms |    2.59 ms |    4.21 ms |     0.69 |    1.94 ms |   11.18 ms |    9.24 ms |          0 |
-| Global               |         1 |     5.19 s |     5.19 s |    0.00 ns |     0.00 |     5.19 s |     5.19 s |    0.00 ns |          0 |
+| 2) Search            |         1 |  660.78 ms |  660.78 ms |    0.00 ns |     0.00 |  660.78 ms |  660.78 ms |    0.00 ns |          0 |
+| 3) Read              |         1 |   25.49 ms |   25.49 ms |    0.00 ns |     0.00 |   25.49 ms |   25.49 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   26.63 us |   26.63 us |    0.00 ns |     0.00 |   26.63 us |   26.63 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    5.31 ms |    4.94 ms |    4.50 ms |     0.12 |    1.79 us |   11.00 ms |   11.00 ms |          0 |
+| 1) Write             |         1 |     3.70 s |     3.70 s |    0.00 ns |     0.00 |     3.70 s |     3.70 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   87.39 ms |   87.39 ms |    0.00 ns |     0.00 |   87.39 ms |   87.39 ms |    0.00 ns |          0 |
+| 1.2) Write Loop      |     65534 |   51.56 ns |   50.00 ns |   31.64 ns |    50.58 |   40.00 ns |    3.28 us |    3.24 us |          2 |
+| 0) Rng chars         |     65522 |   10.24 ns |    9.79 ns |    9.31 ns |     4.13 |    0.21 ns |  410.00 ns |  409.79 ns |         14 |
+| Global               |         1 |     4.52 s |     4.52 s |    0.00 ns |     0.00 |     4.52 s |     4.52 s |    0.00 ns |          0 |
 #========================================================================================================================================#
-Searching took: 1.19 s
-[Expected] RNtuple search take 19.79 ms per 1M iters 
+Searching took: 660.78 ms
+[Expected] RNtuple search take 11.06 ms per 1M iters 
 Total Rows: 59.41 M
 */
 
 
 
 /*
-󰣇 experiments/training/FastIO-Harddrive   main  !? ❯ watchcub status
-
 == CPU ==
   AMD Ryzen 5 7600X 6-Core Processor
   Online CPUs                                  0-11
@@ -204,7 +207,6 @@ Total Rows: 59.41 M
   /sys/class/drm/card0/device/power_dpm_force_performance_level high
 
 */
-
 #include <ROOT/RFieldBase.hxx>
 #include <ROOT/RNTupleModel.hxx>
 #include <ROOT/RNTupleTypes.hxx>
@@ -229,6 +231,7 @@ Total Rows: 59.41 M
 
 #include "latte.hpp"
 
+
 static constexpr uint64_t N = 26*26*26*26*26*5;
 static constexpr int name_len = 5;
 
@@ -238,31 +241,31 @@ static constexpr int name_len = 5;
 #endif
 
 
-static std::string RNG_String(std::mt19937& rng){
+static void RNG_String(std::mt19937& rng, char (&name)[name_len]) {
   static constexpr std::string_view chars = "abcdefghijklmnopqrstuvwxyz";
-  std::uniform_int_distribution<int> dist(0, chars.size()-1);
-  std::string name(name_len, ' ');
-  for(auto&c:name){
-    c=chars[dist(rng)];
+  std::uniform_int_distribution<std::size_t> dist(0, chars.size() - 1);
+  for (char& c : name) {
+    c = chars[dist(rng)];
     LATTE_PULSE("0) Rng chars");
   }
-  return name;
 }
-static int RNG_int(std::mt19937& rng){
+
+
+static auto RNG_int(std::mt19937& rng) -> int{
   std::uniform_int_distribution<int> dist(0, 100);
   return dist(rng);
 }
 
-static uint32_t fnv1a(const std::string& str){ // mystical function
+static auto fnv1a(const char* str, std::size_t len) -> uint32_t { // mystical function
   uint32_t hash = 2166136261u; // Fowler-Noll-Vo hash magic number (hex: 0x811C9DC5)
-  for(unsigned char c : str){
-    hash ^=c;
-    hash *=0x01000193u; //Fowler-Noll-Vo prime magic number (hex: 0x01000193)
+  for (std::size_t i = 0; i < len; ++i) {
+    hash ^= static_cast<unsigned char>(str[i]);
+    hash *= 0x01000193u; //Fowler-Noll-Vo prime magic number (hex: 0x01000193)
   }
   return hash;
 }
 
-static void saveIndex(const std::unordered_map<uint32_t, std::vector<uint64_t>>& index, std::string path) {
+static void saveIndex(const std::unordered_map<uint32_t, std::vector<uint64_t>>& index, const std::string& path) {
   std::ofstream f(path, std::ios::binary);
 
   uint64_t mapSize = index.size();
@@ -276,7 +279,7 @@ static void saveIndex(const std::unordered_map<uint32_t, std::vector<uint64_t>>&
   }
 }
 
-static std::unordered_map<uint32_t, std::vector<uint64_t>> loadIndex(std::string path) {
+static auto loadIndex(const std::string& path) -> std::unordered_map<uint32_t, std::vector<uint64_t>> {
   std::ifstream f(path, std::ios::binary);
   std::unordered_map<uint32_t, std::vector<uint64_t>> index;
 
@@ -302,7 +305,8 @@ static std::unordered_map<uint32_t, std::vector<uint64_t>> loadIndex(std::string
 void write(){ Latte::Fast::Start("1) Write");
   Latte::Fast::Start("1.1) Write init");
   auto model = ROOT::RNTupleModel::Create();
-  auto name = model->MakeField<std::string>("name");
+  // RNTuple fixed-size array column; a raw char[5] would be normalized to std::array<char,5> anyway.
+  auto name = model->MakeField<std::array<char, name_len>>("name");
   auto hash_name = model->MakeField<uint32_t>("hash_name");
   auto age = model->MakeField<int>("age");
 
@@ -310,12 +314,12 @@ void write(){ Latte::Fast::Start("1) Write");
   ROOT::RNTupleWriteOptions opts;
   opts.SetCompression(401); // LZ4
   auto writer = ROOT::RNTupleWriter::Recreate(
-      std::move(model), "Users", "./data/search/users.root", opts
-      ); // when writer destructed, it write the footer in file
-         //1) Fill() × 50k        ->  fills in-memory column buffers (pages)
-         //1.2) page full (~64KB)   ->  page gets compressed (Optional, LZ4 here)
-         //3) cluster threshold   ->  all column pages flushed to disk as one cluster (~50MB default)
-         //4) destructor          ->  final cluster + footer (schema, cluster index) written
+    std::move(model), "Users", "./data/search/users.root", opts
+  ); // when writer destructed, it write the footer in file
+  //1) Fill() × 50k        ->  fills in-memory column buffers (pages)
+  //1.2) page full (~64KB)   ->  page gets compressed (Optional, LZ4 here)
+  //3) cluster threshold   ->  all column pages flushed to disk as one cluster (~50MB default)
+  //4) destructor          ->  final cluster + footer (schema, cluster index) written
 
 
   Latte::Fast::Stop("1.1) Write init");
@@ -324,10 +328,11 @@ void write(){ Latte::Fast::Start("1) Write");
   std::unordered_map<uint32_t, std::vector<uint64_t>> index; //O(1) search if you know what will be searched
 #endif  
   std::mt19937 rng(42);
-  for(int i = 0; i<N; ++i){
-    std::string user = RNG_String(rng);
-    uint32_t huser= fnv1a(user);
-    *name = user;
+  for(int i = 0; std::cmp_less(i,N); ++i){
+    char user[name_len];
+    RNG_String(rng, user);
+    uint32_t huser = fnv1a(user, name_len);
+    std::memcpy(name->data(), user, name_len);
     *hash_name = huser;
     *age = RNG_int(rng);
     writer->Fill(); // Sit in ram, pushed by cluster
@@ -347,24 +352,30 @@ void write(){ Latte::Fast::Start("1) Write");
 
 struct SearchResult{
   std::unique_ptr<ROOT::RNTupleReader> reader;
-  std::vector<long unsigned> matches;
-  std::string tName; // human readable name
+  std::vector<uint64_t> matches;
+  char tName[name_len]; // human readable name
+
+  SearchResult(std::unique_ptr<ROOT::RNTupleReader> r, std::vector<uint64_t> m, const char (&n)[name_len])
+    : reader(std::move(r)), matches(std::move(m)) {
+    std::memcpy(tName, n, name_len);
+  }
+  SearchResult() = default;
 };
 
 //---------------------------------------------------------------------------------------------
-SearchResult SIMD_FSL_Search(const std::string& tName){
+auto SIMD_FSL_Search(const char (&tName)[name_len]) -> SearchResult{
   Latte::Mid::Start("2) Search");
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
 
-  auto vName = reader->GetView<std::string>("name");
+  auto vName = reader->GetView<std::array<char, name_len>>("name");
   const auto nEntries = reader->GetNEntries();
   std::vector<uint64_t> matches;
   matches.reserve(10);
 
-  __m512i tar_firstB = _mm512_set1_epi8(tName.front());
+  __m512i tar_firstB = _mm512_set1_epi8(tName[0]);
   __m512i tar_secB   = _mm512_set1_epi8(tName[1]);
-  __m512i tar_lastB  = _mm512_set1_epi8(tName.back());
+  __m512i tar_lastB  = _mm512_set1_epi8(tName[name_len - 1]);
 
   alignas(64) uint8_t firstB[64], secB[64], lastB[64];
 
@@ -390,45 +401,45 @@ SearchResult SIMD_FSL_Search(const std::string& tName){
     while(mask){ // unroll mask to save bloomed
       LATTE_PULSE("2.1.1) unroll bloom");
       uint32_t j = __builtin_ctzll(mask);
-      if(std::memcmp(tName.data(), vName(v+j).data(), tName.size())==0) matches.push_back(v+j);
+      if(std::memcmp(tName, vName(v+j).data(), name_len)==0) matches.push_back(v+j);
       mask &= mask-1;
     }
   }
-  
+
   Latte::Fast::Stop("2.1) SIMD body");
   Latte::Fast::Start("2.2) SIMD tail");
-  
+
   for(; v<nEntries;++v){ // v tail (no bloom)
     LATTE_PULSE("2.2.1) Tail");
-    if(std::memcmp(tName.data(), vName(v).data(), tName.size())==0) matches.push_back(v);
+    if(std::memcmp(tName, vName(v).data(), name_len)==0) matches.push_back(v);
   }
 
   Latte::Fast::Stop("2.2) SIMD tail");
   Latte::Hard::Stop("2) Search"); 
-  return {std::move(reader), std::move(matches), tName}; // (reader is unique_ptr)
+  return SearchResult(std::move(reader), std::move(matches), tName); // (reader is unique_ptr)
 }
 
 
 //---------------------------------------------------------------------------------------------
-SearchResult SIMD_fnv1a_Search(const std::string& tName){
+auto SIMD_fnv1a_Search(const char (&tName)[name_len]) -> SearchResult{
   Latte::Mid::Start("2) Search");
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
 
-  auto vName = reader->GetView<std::string>("name");
-  auto vHashName = reader->GetView<uint32_t>("hash_name");
+  auto vName = reader->GetView<std::array<char, name_len>>("name");
+  auto vhashView = reader->GetDirectAccessView<uint32_t>("hash_name");
   const auto nEntries = reader->GetNEntries();
   std::vector<uint64_t> matches;
   matches.reserve(10);
 
-  __m512i tar_hashed = _mm512_set1_epi32((int)fnv1a(tName));
+  __m512i tar_hashed = _mm512_set1_epi32(static_cast<int>(fnv1a(tName, name_len)));
   alignas(64) uint32_t hashed[16];
 
   Latte::Fast::Start("2.1) SIMD body");
   uint64_t v = 0;
   for(; v+16<=nEntries; v+=16){
     for(uint32_t j = 0; j < 16; ++j){ // loading v64
-      const auto& h = vHashName(v+j);
+      const auto& h = vhashView(v+j);
       hashed[j] = static_cast<uint32_t>(h);
     }
     __m512i vcan_hashed = _mm512_load_si512(hashed); // last step of loading
@@ -438,7 +449,7 @@ SearchResult SIMD_fnv1a_Search(const std::string& tName){
     while(mask){ // unroll mask to save bloomed
       LATTE_PULSE("2.1.1) unroll bloom");
       uint32_t j = __builtin_ctzll(mask);
-      if(std::memcmp(tName.data(), vName(v+j).data(), tName.size())==0) matches.push_back(v+j);
+      if(std::memcmp(tName, vName(v+j).data(), name_len)==0) matches.push_back(v+j);
       mask &= mask-1;
     }
   }
@@ -446,56 +457,65 @@ SearchResult SIMD_fnv1a_Search(const std::string& tName){
 
   Latte::Fast::Stop("2.1) SIMD body");
   Latte::Fast::Start("2.2) SIMD tail");
-  
+
   for(; v<nEntries;++v){ // v tail (no bloom)
     LATTE_PULSE("2.2.1) Tail");
-    if(std::memcmp(tName.data(), vName(v).data(), tName.size())==0) matches.push_back(v);
+    if(std::memcmp(tName, vName(v).data(), name_len)==0) matches.push_back(v);
   }
 
 
   Latte::Fast::Stop("2.2) SIMD tail");
   Latte::Hard::Stop("2) Search");
-  return {std::move(reader), std::move(matches), tName}; //move to avoid destruct (reader is unique_ptr)
+  return SearchResult(std::move(reader), std::move(matches), tName); //move to avoid destruct (reader is unique_ptr)
 }
 
 
 //---------------------------------------------------------------------------------------------
-SearchResult O1Search(std::string tName) {
+auto O1Search(const char (&tName)[name_len]) -> SearchResult {
   Latte::Mid::Start("2) Search");
   Latte::Fast::Start("2.1) Search LoadIndex");
   auto index = loadIndex("./data/search/users.idx");
   Latte::Fast::Stop("2.1) Search LoadIndex");
-  uint32_t target = fnv1a(tName);
-  Latte::Fast::Start("2.2) Search find");
-  auto& rows = index[target]; // O(1) hashmap hasname search
 
+  auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
+  auto vName = reader->GetView<std::array<char, name_len>>("name");
+
+  uint32_t target = fnv1a(tName, name_len);
+  Latte::Fast::Start("2.2) Search find");
+  std::vector<uint64_t> matches;
+  auto it = index.find(target); // O(1) hashmap lookup
+  if (it != index.end()) {
+    // fnv1a is 32-bit: different names can share a bucket, so confirm with memcmp.
+    for (uint64_t row : it->second) {
+      if (std::memcmp(tName, vName(row).data(), name_len) == 0) matches.push_back(row);
+    }
+  }
   Latte::Fast::Stop("2.2) Search find");
   Latte::Hard::Stop("2) Search");
 
-  return {std::move(ROOT::RNTupleReader::Open("Users", "./data/search/users.root")
-), std::move(rows), tName};
+  return SearchResult(std::move(reader), std::move(matches), tName);
 }
 
 //---------------------------------------------------------------------------------------------
-SearchResult ConstSearch(const std::string& tName) {
+auto ConstSearch(const char (&tName)[name_len]) -> SearchResult {
   Latte::Mid::Start("2) Search");
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
-  auto vName = reader->GetView<std::string>("name");
+  auto vName = reader->GetView<std::array<char, name_len>>("name");
+  const auto nEntries = reader->GetNEntries();
   std::vector<uint64_t> candidates;
   candidates.reserve(10);
 
   char xa[name_len];
   char xb[name_len];
-  std::memcpy(&xa, tName.data(), name_len);
-  // safe: size()+1 includes the guaranteed null terminator
-  for (uint64_t i = 0; i < N; ++i) {
-    auto iname = vName(i);
-    std::memcpy(&xb, iname.data(), name_len);
+  std::memcpy(xa, tName, name_len);
+  for (uint64_t i = 0; i < nEntries; ++i) {
+    const auto& iname = vName(i);
+    std::memcpy(xb, iname.data(), name_len);
     if (std::memcmp(xa, xb, name_len) == 0) candidates.push_back(i);
   }
   Latte::Hard::Stop("2) Search");
-  return {std::move(reader), std::move(candidates), tName};
+  return SearchResult(std::move(reader), std::move(candidates), tName);
 }
 
 //---------------------------------------------------------------------------------------------
@@ -505,11 +525,11 @@ static inline void DoNotOptimize(const T& v) {
   asm volatile("" : : "r,m"(v) : "memory");
 }
 
-SearchResult NoSearch(const std::string& tName) {
+auto NoSearch(const char (&tName)[name_len]) -> SearchResult {
   Latte::Mid::Start("2) Search");
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
-  auto vName = reader->GetView<std::string>("name");
+  auto vName = reader->GetView<std::array<char, name_len>>("name");
   const auto nEntries = reader->GetNEntries();
 
   for (uint64_t i = 0; i < nEntries; ++i) {
@@ -518,48 +538,73 @@ SearchResult NoSearch(const std::string& tName) {
   }
 
   Latte::Hard::Stop("2) Search");
-  return {std::move(reader), std::vector<uint64_t>{}, tName};
+  return SearchResult(std::move(reader), std::vector<uint64_t>{}, tName);
 }
+
+
+auto NoSearchHash(const char (&tName)[name_len]) -> SearchResult {
+  Latte::Mid::Start("2) Search");
+  ROOT::DisableImplicitMT();
+  auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
+  auto vhashView = reader->GetDirectAccessView<uint32_t>("hash_name");
+  const auto nEntries = reader->GetNEntries();
+
+  for (uint64_t i = 0; i < nEntries; ++i) {
+    const auto& s = vhashView(i);
+    DoNotOptimize(s); // iterations cost 
+  }
+
+  Latte::Hard::Stop("2) Search");
+  return SearchResult(std::move(reader), std::vector<uint64_t>{}, tName);
+}
+
 
 //---------------------------------------------------------------------------------------------
 
 void read(SearchResult& Sresult){
   Latte::Mid::Start("3) Read");
   Latte::Fast::Start("3.1) Read Init");
-  auto vName = Sresult.reader->GetView<std::string>("name");
-  auto vAge = Sresult.reader->GetView<int>("age");
+  auto vName = Sresult.reader->GetView<std::array<char, name_len>>("name");
+  auto vAge = Sresult.reader->GetDirectAccessView<int>("age");
   Latte::Fast::Stop("3.1) Read Init");
-  std::cout << "[Sys] Found " << Sresult.matches.size() << " users named: " << Sresult.tName << "\n   Within a database made of " << Sresult.reader->GetNEntries() << " users" << std::endl;
+  std::cout 
+    << "[Sys] Found " << Sresult.matches.size() 
+    << " users named: " << std::string_view(Sresult.tName, name_len)
+    << "\n   Within a database made of " << Sresult.reader->GetNEntries() 
+    << " users" << '\n';
 
 
   for(auto&idx:Sresult.matches){
-    std::cout 
-      << " [User]: " << vName(idx)
-      << " [Age]: " << vAge(idx) << std::endl;
+    const auto& nm = vName(idx);
+    std::cout << " [User]: ";
+    std::cout.write(nm.data(), nm.size());
+    std::cout << " [Age]: " << vAge(idx) << '\n';
     LATTE_PULSE("3.2) Read Findings");
   }
   Latte::Hard::Stop("3) Read");
 }
 
 
-int main(){
+auto main() -> int{
 #if RUN_O1SEARCH
   std::cout << "[" << __TIME__ << "] Use O(1) via unordered_map"  << std::endl;
 #elif RUN_SIMDFSLSEARCH
   std::cout << "[" << __TIME__ << "] use Iterative AVX512 + FSL" << std::endl;
 #elif RUN_SIMDFNV1ASEARCH
   std::cout << "[" << __TIME__ << "] use Iterative AVX512 + fnv1a" << std::endl;
-#elif RUN_CONSTSEACH
+#elif RUN_CONSTSEARCH
   std::cout << "[" << __TIME__ << "] use Iterative const size"  << std::endl;
 #elif RUN_NOSEARCH
   std::cout << "[" << __TIME__ << "] Baseline cost of iterating over RNTuple"  << std::endl;
+#elif RUN_NOSEARCHHash
+  std::cout << "[" << __TIME__ << "] Baseline cost of iterating over RNTuple with hash"  << std::endl;
 #else 
-  std::cout << "No Parameter search function given, Abort()" << std::endl;
+  std::cout << "No Parameter search function given, Abort()" << '\n';
   abort();
 #endif
 
 
-  std::string tName = "alice";
+  char tName[name_len] = {'a', 'l', 'i', 'c', 'e'};
   Latte::Mid::Start("Global");
   write();
 
@@ -571,10 +616,12 @@ int main(){
   Sresult = SIMD_FSL_Search(tName); // AVX512 with bloom first+second+last name char
 #elif RUN_SIMDFNV1ASEARCH
   Sresult = SIMD_fnv1a_Search(tName); // AVX512 with bloom fnv1a hashing
-#elif RUN_CONSTSEACH
+#elif RUN_CONSTSEARCH
   Sresult = ConstSearch(tName); // constant name size
 #elif RUN_NOSEARCH
   Sresult = NoSearch(tName); // iterations cost, no search
+#elif RUN_NOSEARCHHASH
+  Sresult = NoSearchHash(tName); // iterations cost with fixed size uint32_t, no search
 #endif
 
 
@@ -587,9 +634,9 @@ int main(){
   auto snap_Search = Latte::Snapshot("2) Search")[0];
   double cycles_per_ns;
   LATTE_FREQ(cycles_per_ns);
-  std::cout << "Searching took: " << Latte::FormatTime(snap_Search/cycles_per_ns) << std::endl;
-  std::cout << "[Expected] RNtuple search take " << Latte::FormatTime((snap_Search/N*1'000'000)/4.7) << " per 1M iters " << std::endl;
-  auto LargeFormat = [](double val) {
+  std::cout << "Searching took: " << Latte::FormatTime(snap_Search/cycles_per_ns) << '\n';
+  std::cout << "[Expected] RNtuple search take " << Latte::FormatTime((snap_Search/N*1'000'000)/4.7) << " per 1M iters " << '\n';
+  auto LargeFormat = [](double val) -> std::string {
     const char* units[] = {"", "K", "M", "B", "T"};
     int unit_idx = 0;
     while (val >= 1000.0 && unit_idx < 4) { val /= 1000.0; unit_idx++; }
@@ -600,6 +647,6 @@ int main(){
   };
 
   std::cout << "Total Rows: " << LargeFormat(N);
-  std::cout << std::endl;
+  std::cout << '\n';
 }
 
