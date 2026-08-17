@@ -58,7 +58,6 @@ Delta vs `nosearch` (same build):
 
 | | Δ task-clock | Δ cycles | Δ insn | insn/row | L1 loads/row |
 |---|---|---|---|---|---|
-| nosearchhash | -273.5 ms | -1.348 G | -5.225 G | -87.9 | -29.0 |
 | fnv1a | -226.0 ms | -1.389 G | -4.979 G | -83.8 | -28.1 |
 | fsl | +108.6 ms | +0.423 G | +0.006 G | +0.1 | -1.5 |
 | const | +124.4 ms | +0.567 G | +0.635 G | +10.7 | +6.9 |
