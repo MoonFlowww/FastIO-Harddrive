@@ -2,6 +2,28 @@
 
 Query `Search "alice" in name`, 59.4M rows, 4 matches, single thread, no shard.
 
+## Results
+
+Per 1M rows, current build (`GetDirectAccessView` + fixed-size `char[5]` names):
+
+| method | ms / 1M | telemetry search |
+|---|---|---|
+| `NoSearchHash` (raw `uint32_t` iteration) | 4.47 | 277.36 ms |
+| `SIMD_fnv1a_Search` | 4.89 | 298.64 ms |
+| `NoSearch` (raw `char[5]` iteration) | 9.15 | 538.14 ms |
+| `SIMD_FSL_Search` | 10.43 | 625.84 ms |
+| `ConstSearch` | 11.06 | 670.86 ms |
+| `O1Search` | load 1.24 s ∥ find 18.24 ms | 1.15 s (LoadIndex 1.13 s; find = 19.21 ms) |
+
+Notes:
+
+- Fixed-size columns are read with `GetDirectAccessView` (`hash_name` `uint32_t`, `age` `int`): direct pointer into the page buffer, fixed stride, no per-element `shared_ptr` refcount traffic.
+- The `name` column is a fixed-size `std::array<char,5>` inside RNTuple; all search-side arrays are plain `char[name_len]`, and confirmation is a 5-byte `memcmp`.
+- AVX512 methods bloom with mask+ctz: the vectorized search does not iterate over all rows on the confirm path.
+- `O1Search` loads a persisted `unordered_map` index; the load dominates (find = 18–19 ms).
+
+>  if we can keep umap in ram, it is the fastest, unfortunately it scale poorly ...
+
 ## Environment
 
 ```
@@ -18,109 +40,79 @@ runs       perf under `taskset -c 3`
 Run-to-run: instructions ±0.06%, L1 loads ±0.3%, cycles ±4%, task-clock ±2.7%.
 Deltas under ~5% are not separable.
 
-## Timing
-
-| method | ms / 1M | telemetry search |
-|---|---|---|
-| `SIMD_fnv1a_Search` | 12.77 | 769.18 ms |
-| `NoSearch` | 16.38 | - |
-| `SIMD_FSL_Search` | 16.81 | 1.01 s |
-| `ConstSearch` | 20.21 | 1.19 s |
-| `O1Search` | 1200 | 1.20 s (LoadIndex; find = 226.79 us) |
-
-
->  if we can keep umap in ram, it is the fastest, unfortunately it scale poorly ...
-
 ## perf stat, whole program
 
-| | nosearch | fnv1a | fsl | const | o1 |
-|---|---|---|---|---|---|
-| task-clock (ms) | 5397.87 | 5220.96 | 5705.49 | 5656.66 | 32793.72 |
-| cycles:u | 26.465 G | 25.494 G | 27.870 G | 27.686 G | 171.271 G |
-| instructions:u | 71.092 G | 61.598 G | 71.197 G | 73.614 G | 95.382 G |
-| IPC | 2.686 | 2.416 | 2.555 | 2.659 | 0.557 |
-| L1-dcache-loads | 22.884 G | 19.491 G | 23.008 G | 23.782 G | 35.590 G |
-| L1-dcache-load-misses | 383.3 M | 351.1 M | 388.3 M | 387.1 M | 1108.3 M |
-| page-faults | 97 205 | 97 213 | 97 217 | 97 214 | 419 888 |
+Whole-program runs include the ~4 s write phase; search-only differences are in Results.
 
-Delta vs `nosearch`:
+| | nosearch | nosearchhash | fnv1a | fsl | const | o1 |
+|---|---|---|---|---|---|---|
+| task-clock (ms) | 4636.15 | 4362.66 | 4410.18 | 4744.79 | 4760.50 | 31783.19 |
+| cycles:u | 22.118 G | 20.771 G | 20.729 G | 22.541 G | 22.686 G | 166.279 G |
+| instructions:u | 60.959 G | 55.734 G | 55.980 G | 60.965 G | 61.594 G | 93.950 G |
+| IPC | 2.756 | 2.683 | 2.701 | 2.705 | 2.715 | 0.565 |
+| L1-dcache-loads | 19.358 G | 17.633 G | 17.687 G | 19.269 G | 19.769 G | 35.324 G |
+| L1-dcache-load-misses | 289.5 M | 290.7 M | 292.5 M | 289.8 M | 289.2 M | 1056.5 M |
+| page-faults | 168 842 | 168 836 | 170 486 | 170 485 | 169 253 | 433 097 |
+
+Delta vs `nosearch` (same build):
 
 | | Δ task-clock | Δ cycles | Δ insn | insn/row | L1 loads/row |
 |---|---|---|---|---|---|
-| fnv1a | -176.9 ms | -0.970 G | -9.494 G | -159.8 | -57.1 |
-| fsl | +307.6 ms | +1.405 G | +0.106 G | +1.8 | +2.1 |
-| const | +258.8 ms | +1.222 G | +2.522 G | +42.5 | +15.1 |
+| nosearchhash | -273.5 ms | -1.348 G | -5.225 G | -87.9 | -29.0 |
+| fnv1a | -226.0 ms | -1.389 G | -4.979 G | -83.8 | -28.1 |
+| fsl | +108.6 ms | +0.423 G | +0.006 G | +0.1 | -1.5 |
+| const | +124.4 ms | +0.567 G | +0.635 G | +10.7 | +6.9 |
 
-## Profile
-
-`SIMD_fnv1a_Search` inner loop:
-
-```
-      cmpb  $0x0,__libc_single_threaded   ; fast path check, FAILS
-      je    660
-660:  lock xadd %edx,(%r9)                ; 40.15%
-551:  mov   0x8(%r12),%rax                ; 33.06%  dep on locked store
-      movabs $0x100000001,%r8
-      cmp   %r8,%rax
-6c0:  lock xadd %r11d,(%r9)               ; 19.29%
-597:  mov   0x0(%r13),%r13d               ;  0.10%  u32 load
-      mov   %r13d,-0x4(%r14)              ;  0.24%  store hashed[j]
-      cmp   %r14,%r12                     ;  0.78%
-```
-
-`SIMD_FSL_Search` gather:
+## Access path
 
 ```
-      movzbl (%r11),%r15d                 ;  0.10%
-      movzbl 0x1(%r11),%ecx               ;  0.05%
-      movzbl -0x1(%r11,%rcx,1),%r12d      ;  0.05%
-360:  lock xadd %edi,(%r9)                ; 46.85%
-1dd:  cmp/movabs $0x100000001             ; 47.33% + 3.37%
+SIMD_fnv1a_Search, hot path (per row):
+  vhashView(v+j)                   GetDirectAccessView<uint32_t> "hash_name"
+                                   direct pointer into page buffer, fixed stride
+                                   u32 load — no shared_ptr, no materialization
+  memcmp(tName, vName(v+j).data()) only on bloom hits; GetView<std::array<char,5>>
+                                   "name" materializes 5 bytes (rare, 4 hits)
 ```
 
-Per-row path:
-
-```
-vHashName(v+j)
-  bounds-check vs page range
-  shared_ptr copy      -> lock xadd +1
-  memcpy 4 bytes
-  shared_ptr destroy   -> lock xadd -1, unique check, maybe _M_release_last_use_cold
-```
-
-~63 cycles/row (fnv1a), ~84 (fsl), for 4 resident bytes.
+`SIMD_FSL_Search` reads the name column every row via `GetView<std::array<char,5>>`
+(gathers `front()`, `[1]`, `back()` into 3 scratch arrays), which is why it is ~2× the
+fnv1a path.
 
 ## Methods
 
 ```
-SIMD_fnv1a_Search                          12.77 ms/1M   3 bloom captures
+SIMD_fnv1a_Search                          4.89 ms/1M   3 bloom captures
+  GetDirectAccessView<uint32_t> hash_name   (direct page-buffer access, fixed size)
   for v in steps of 16:
       load hash_name[v..v+16] -> __m512i
       mask = cmpeq_epi32(target_hash, vec)
       while mask: j=ctz(mask); memcmp confirm; mask &= mask-1
   tail: scalar memcmp
 
-SIMD_FSL_Search                            16.81 ms/1M   3275 bloom captures
+SIMD_FSL_Search                            10.43 ms/1M   3275 bloom captures
   for v in steps of 64:
       gather byte[0], byte[1], byte[len-1] of 64 names -> 3 scratch arrays
       mask = cmpeq8(f) & cmpeq8(s) & cmpeq8(l)
       while mask: j=ctz(mask); memcmp confirm; mask &= mask-1
   tail: scalar memcmp
 
-NoSearch                                   16.38 ms/1M
-  for v in 0..N: touch(name[v].front())
+NoSearchHash                               4.47 ms/1M
+  for v in 0..N: touch(hash_name[v])        # GetDirectAccessView<uint32_t>
 
-ConstSearch                                20.21 ms/1M
+NoSearch                                   9.15 ms/1M
+  for v in 0..N: touch(name[v].front())     # GetView<std::array<char,5>>
+
+ConstSearch                                11.06 ms/1M
   for v in 0..N: memcmp(target, name[v], name_len)
 
-O1Search                                   1.20 s
+O1Search                                   load 1.24 s || find 18.24 ms
   index = loadIndex("users.idx")
-  rows  = index[fnv1a(target)]     # 226.79 us
+  rows  = index[fnv1a(target)]     # find = 18.24 ms
 ```
 
 
 TODO:
-- std::array<char, 5> instead of string as name
 - consumer ID
-- gpu slice deconding
+- gpu slice decoding
+- unsync multithread for lightweight max speed
 - sharding: `SHARD_MAP(hash % BIG_N) -> shard id` (`_ % BIG_N` is here to scale; if new shard necessary, we can just cut one into subs, and update the lookup table; BIG_N > Shards)
