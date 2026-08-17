@@ -6,7 +6,7 @@ Query `Search "alice" in name`, 59.4M rows, 4 matches, single thread, no shard.
 
 Per 1M rows, current build (`GetDirectAccessView` + fixed-size `char[5]` names):
 
-| method | ms / 1M | telemetry search |
+| method | ms / 1M | Total (~60m rows) |
 |---|---|---|
 | `NoSearchHash` (raw `uint32_t` iteration) | 4.47 | 277.36 ms |
 | `SIMD_fnv1a_Search` | 4.89 | 298.64 ms |
