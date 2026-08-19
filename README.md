@@ -73,7 +73,7 @@ Delta vs `nosearch` (same build):
 SIMD_fnv1a_Search, hot path (per row):
   vhashView(v+j)                   GetDirectAccessView<uint32_t> "hash_name"
                                    direct pointer into page buffer, fixed stride
-                                   u32 load — no shared_ptr, no materialization
+                                   u32 load, no shared_ptr, no materialization
   memcmp(tName, vName(v+j).data()) only on bloom hits; GetView<std::array<char,5>>
                                    "name" materializes 5 bytes (rare, 4 hits)
 ```

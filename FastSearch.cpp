@@ -647,9 +647,9 @@ auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
   uint64_t base = 0; // base idx
   uint64_t len  = nEntries;
   while (len > 1) {
-    const uint64_t half = len >> 1;
+    const uint64_t half = len >> 1; 
     const uint32_t value= vHName(base + half - 1);
-    base += half & (uint64_t)(-(int64_t)(value < key));
+    base += half & (uint64_t)(-(int64_t)(value < key)); // 0,1 -> 0,-1 -> 0,0xFF.. -> base+=0, base+=half
     len  -= half;
     LATTE_PULSE("2.1.1) BODY LOOP");
   } base += (uint64_t)(vHName(base) < key);
