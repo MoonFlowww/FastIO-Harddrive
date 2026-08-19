@@ -4,7 +4,7 @@
 // avx512 FSL:        11.06 ms (3275 captures in bloom body)
 // constsize:         11.06 ms 
 // Additive Binary:  212.77 us (25 iters)
-// Add/Sub Binary:   425.53 us 
+// Add/Sub Binary:   212.77 us 
 
 // Raw Iterations Char[5]:    9.15 ms 
 // Raw Iter Hash<uint32_t>:   4.47 ms
