@@ -94,6 +94,7 @@
 #include <utility>
 #include <vector>
 #include <immintrin.h>
+#include <likwid-marker.h>
 #include <TROOT.h>
 #include <ROOT/RDataFrame.hxx>
 
@@ -484,7 +485,7 @@ auto NewBinarySearch(const char (&tName)[name_len]) -> SearchResult {
   while (len > 1) {
     const uint64_t half = len >> 1; 
     const uint32_t value = vHName(base + half - 1);
-    base += half & (uint64_t)(-(int64_t)(value < key)); // 0,1 -> 0,-1 -> 0,0xFF.. -> base+=0, base+=half
+    base += half & (uint64_t)(-(int64_t)(value < key)); // 0,1 -> 0,-1 -> 0x0,0xFF.. -> base+=0, base+=half
     len -= half;
     LATTE_PULSE("2.1.1) BODY LOOP");
   } 
@@ -538,6 +539,9 @@ auto OldBinarySearch(const char (&tName)[name_len]) -> SearchResult {
     LATTE_PULSE("2.1.1) BODY LOOP");
   }  
   /*
+   idx = 0
+   next_half = n>>1
+   while(next_half)
     idx+=next_half; //add or sub
     auto cmp = key - vHName(idx);
     next_half &=0x7FFFFFFFFFFFFFFFLL; //reset sign
@@ -631,6 +635,9 @@ void read(SearchResult& Sresult){
 
 
 auto main() -> int{
+  LIKWID_MARKER_INIT;
+  LIKWID_MARKER_REGISTER("1_Write");
+  LIKWID_MARKER_REGISTER("2_Search");
 #if RUN_O1SEARCH
   std::cout << "[" << __TIME__ << "] Use O(1) via unordered_map"  << std::endl;
 #elif RUN_SIMDFSLSEARCH
@@ -655,10 +662,13 @@ auto main() -> int{
 
   char tName[name_len] = {'a', 'l', 'i', 'c', 'e'};
   Latte::Mid::Start("Global");
+  LIKWID_MARKER_START("1_Write");
   write();
+  LIKWID_MARKER_STOP("1_Write");
 
 
   SearchResult Sresult;
+  LIKWID_MARKER_START("2_Search");
 #if RUN_O1SEARCH
   Sresult = O1Search(tName); // academically fast O(1)
 #elif RUN_SIMDFSLSEARCH
@@ -676,6 +686,7 @@ auto main() -> int{
 #elif RUN_NOSEARCHHASH
   Sresult = NoSearchHash(tName); // iterations cost with fixed size uint32_t, no search
 #endif
+  LIKWID_MARKER_STOP("2_Search");
 
 
   read(Sresult);
@@ -705,5 +716,7 @@ auto main() -> int{
 
   std::cout << "Total Rows: " << LargeFormat(N);
   std::cout << '\n';
+
+  LIKWID_MARKER_CLOSE;
 }
 

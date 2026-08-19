@@ -28,6 +28,25 @@ Notes:
 
 >  if we can keep umap in ram, it is the fastest, unfortunately it scale poorly ...
 
+## Per-region hardware counters (likwid markers)
+
+`1_Write` and `2_Search` are wrapped with the LIKWID marker API
+(`-DLIKWID_PERFMON`, `-llikwid`). Run:
+
+```bash
+/usr/bin/likwid-lua ~/.local/opt/likwid-5.5.2/likwid-perfctr -m -C 0 -g BRANCH ./bin/fastsearch_fnv1a   # branch counters + CPI
+/usr/bin/likwid-lua ~/.local/opt/likwid-5.5.2/likwid-perfctr -m -C 0 -g CACHE  ./bin/fastsearch_fnv1a   # cache miss rates
+/usr/bin/likwid-lua ~/.local/opt/likwid-5.5.2/likwid-perfctr -m -C 0 -g MEM    ./bin/fastsearch_fnv1a   # DRAM bandwidth
+```
+
+Requires the fixed likwid 5.5.2 reader (system 5.5.1 ships a marker-file
+parsing bug on glibc >= 2.40: `sscanf "%d:%139c"` fails on short region
+names). The fixed build lives in `~/.local/opt/likwid-5.5.2` with a patched
+module at `~/.local/share/lua/likwid.lua`; perf groups are symlinked from
+`/usr/share/likwid/perfgroups`. `perf_event_paranoid` must be <= 1.
+Plain `./bin/...` runs are unaffected (markers become no-ops, Latte output
+unchanged).
+
 ## Environment
 
 ```

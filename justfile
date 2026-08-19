@@ -5,9 +5,9 @@ src        := "FastSearch.cpp"
 data       := "data/search"
 bindir     := "bin"
 
-root_flags := `root-config --cflags --libs`
+root_flags := `root-config --cflags --libs` + " -llikwid"
 
-o_base := "-O3 -march=native -mtune=native -mprefer-vector-width=512"
+o_base := "-O3 -march=native -mtune=native -mprefer-vector-width=512 -DLIKWID_PERFMON"
 o_math := " -ffast-math -fno-math-errno -fomit-frame-pointer"
 o_loop := " -funroll-loops -fprefetch-loop-arrays -falign-functions=32 -falign-loops=32 -falign-jumps=32"
 o_code := " -fno-plt -fno-semantic-interposition -fno-stack-protector -fvect-cost-model=unlimited"
