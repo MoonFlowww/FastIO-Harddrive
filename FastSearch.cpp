@@ -3,6 +3,7 @@
 // avx512 fnv1a:      4.89 ms  (   3 captures in bloom body, use GetDirectAccessView since hash is fixed size) 
 // avx512 FSL:        10.43 ms (3275 captures in bloom body)
 // constsize O(1):    11.06 ms 
+// Binary Search:    212.77 us (25 iters)
 
 
 // Raw Iterations Char[5]:    9.15 ms 
@@ -158,6 +159,44 @@ Searching took: 660.78 ms
 Total Rows: 59.41 M
 */
 
+/*
+./bin/fastsearch_bin
+[14:51:33] Binary Search
+Warning in <ROOT_TImplicitMT_DisableImplicitMT>: Implicit multi-threading is already disabled
+[Sys] Found 4 users named: alice
+   Within a database made of 59406880 users
+ [User]: alice [Age]: 45
+ [User]: alice [Age]: 30
+ [User]: alice [Age]: 61
+ [User]: alice [Age]: 19
+
+#========================================================================================================================================#
+| LATTE TELEMETRY [TIME][RAW]                                                                                                            |
+#========================================================================================================================================#
+| COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |    OUTLIER |
+|----------------------------------------------------------------------------------------------------------------------------------------|
+| 2) Search            |         1 |   24.44 ms |   24.44 ms |    0.00 ns |     0.00 |   24.44 ms |   24.44 ms |    0.00 ns |          0 |
+| 3) Read              |         1 |    4.74 ms |    4.74 ms |    0.00 ns |     0.00 |    4.74 ms |    4.74 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   16.67 us |   16.67 us |    0.00 ns |     0.00 |   16.67 us |   16.67 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    1.98 us |    2.13 us |  557.70 ns |    -0.39 |    1.23 us |    2.57 us |    1.34 us |          0 |
+| 1) Write             |         1 |     3.71 s |     3.71 s |    0.00 ns |     0.00 |     3.71 s |     3.71 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   78.35 ms |   78.35 ms |    0.00 ns |     0.00 |   78.35 ms |   78.35 ms |    0.00 ns |          0 |
+| 1.2) Write Loop      |     65531 |   51.75 ns |   50.00 ns |   32.43 ns |    50.95 |   40.00 ns |    3.41 us |    3.37 us |          5 |
+| 0) Rng chars         |     65522 |   10.22 ns |    9.79 ns |    9.20 ns |     4.51 |    0.21 ns |  440.21 ns |  440.00 ns |         14 |
+| Sort RNTuple         |         1 |     7.03 s |     7.03 s |    0.00 ns |     0.00 |     7.03 s |     7.03 s |    0.00 ns |          0 |
+| Reading              |         1 |     2.15 s |     2.15 s |    0.00 ns |     0.00 |     2.15 s |     2.15 s |    0.00 ns |          0 |
+| Sorting              |         1 |     3.25 s |     3.25 s |    0.00 ns |     0.00 |     3.25 s |     3.25 s |    0.00 ns |          0 |
+| Writing sorted data  |         1 |     1.63 s |     1.63 s |    0.00 ns |     0.00 |     1.63 s |     1.63 s |    0.00 ns |          0 |
+| 2.1) Body            |         1 |   18.81 ms |   18.81 ms |    0.00 ns |     0.00 |   18.81 ms |   18.81 ms |    0.00 ns |          0 |
+| 2.1.1) BODY LOOP     |        25 |  452.05 us |   10.00 ns |  603.57 us |     0.59 |    0.21 ns |    1.40 ms |    1.40 ms |          0 |
+| 2.2) tail            |         1 |   70.00 ns |   70.00 ns |    0.00 ns |     0.00 |   70.00 ns |   70.00 ns |    0.00 ns |          0 |
+| 2.3) Deblooming      |         1 |  534.16 us |  534.16 us |    0.00 ns |     0.00 |  534.16 us |  534.16 us |    0.00 ns |          0 |
+| Global               |         1 |    10.97 s |    10.97 s |    0.00 ns |     0.00 |    10.97 s |    10.97 s |    0.00 ns |          0 |
+#========================================================================================================================================#
+Searching took: 24.44 ms
+[Expected] RNtuple search take 212.77 us per 1M iters 
+Total Rows: 59.41 M
+*/
 
 
 /*
@@ -631,7 +670,7 @@ auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
 
   Latte::Fast::Start("2.3) Deblooming");
   for (size_t i = 0; i < candidates.size(); ) {
-    if (std::memcmp(tName, vName(candidates[i]).data(), name_len) == 0) candidates.erase(candidates.begin()+i);
+    if (std::memcmp(tName, vName(candidates[i]).data(), name_len) != 0) candidates.erase(candidates.begin()+i);
     else ++i;
   }
   Latte::Fast::Stop("2.3) Deblooming");
