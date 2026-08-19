@@ -1,10 +1,10 @@
 // Per 1M rows
-// O(1):              load: 1.24 s || search: 18.24ms
-// avx512 fnv1a:      4.89 ms  (   3 captures in bloom body, use GetDirectAccessView since hash is fixed size) 
-// avx512 FSL:        10.43 ms (3275 captures in bloom body)
-// constsize O(1):    11.06 ms 
-// Binary Search:    212.77 us (25 iters)
-
+// O(1):              19.70ms (total search time; loading: 1.15s)
+// avx512 fnv1a:       4.89 ms  (   3 captures in bloom body, use GetDirectAccessView since hash is fixed size) 
+// avx512 FSL:        11.06 ms (3275 captures in bloom body)
+// constsize:         11.06 ms 
+// Additive Binary:  212.77 us (25 iters)
+// Add/Sub Binary:   425.53 us 
 
 // Raw Iterations Char[5]:    9.15 ms 
 // Raw Iter Hash<uint32_t>:   4.47 ms
@@ -25,7 +25,7 @@
 //--------------------------------------------- Academically fast through unordered_map O(1) ---------------------
 /*
 ./bin/fastsearch_o1
-[10:39:50] Use O(1) via unordered_map
+[20:26:03] Use O(1) via unordered_map
 [Sys] Found 4 users named: alice
    Within a database made of 59406880 users
  [User]: alice [Age]: 45
@@ -38,25 +38,25 @@
 #========================================================================================================================================#
 | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |    OUTLIER |
 |----------------------------------------------------------------------------------------------------------------------------------------|
-| 2) Search            |         1 |     1.20 s |     1.20 s |    0.00 ns |     0.00 |     1.20 s |     1.20 s |    0.00 ns |          0 |
-| 2.1) Search LoadInde |         1 |     1.20 s |     1.20 s |    0.00 ns |     0.00 |     1.20 s |     1.20 s |    0.00 ns |          0 |
-| 2.2) Search find     |         1 |  226.79 us |  226.79 us |    0.00 ns |     0.00 |  226.79 us |  226.79 us |    0.00 ns |          0 |
-| 1) Write             |         1 |    28.03 s |    28.03 s |    0.00 ns |     0.00 |    28.03 s |    28.03 s |    0.00 ns |          0 |
-| 1.1) Write init      |         1 |   88.09 ms |   88.09 ms |    0.00 ns |     0.00 |   88.09 ms |   88.09 ms |    0.00 ns |          0 |
-| 0) Rng chars         |     65535 |   92.61 ns |    9.79 ns |  176.18 ns |     2.26 |    0.21 ns |    3.82 us |    3.82 us |          1 |
-| 1.2) Write Loop      |     65530 |  467.11 ns |  450.00 ns |  139.53 ns |     5.02 |   70.00 ns |    5.07 us |    5.00 us |          6 |
-| 1.3) Write SaveIndex |         1 |     1.76 s |     1.76 s |    0.00 ns |     0.00 |     1.76 s |     1.76 s |    0.00 ns |          0 |
-| 3) Read              |         1 |   23.76 ms |   23.76 ms |    0.00 ns |     0.00 |   23.76 ms |   23.76 ms |    0.00 ns |          0 |
-| 3.1) Read Init       |         1 |   20.56 us |   20.56 us |    0.00 ns |     0.00 |   20.56 us |   20.56 us |    0.00 ns |          0 |
-| 3.2) Read Findings   |         3 |    5.24 ms |    2.58 ms |    4.21 ms |     0.70 |    1.97 ms |   11.19 ms |    9.22 ms |          0 |
+| 2) Search            |         1 |   19.70 ms |   19.70 ms |    0.00 ns |     0.00 |   19.70 ms |   19.70 ms |    0.00 ns |          0 |
+| LoadIndex            |         1 |     1.15 s |     1.15 s |    0.00 ns |     0.00 |     1.15 s |     1.15 s |    0.00 ns |          0 |
+| 2.2) Search find     |         1 |   19.69 ms |   19.69 ms |    0.00 ns |     0.00 |   19.69 ms |   19.69 ms |    0.00 ns |          0 |
+| 3) Read              |         1 |   25.31 ms |   25.31 ms |    0.00 ns |     0.00 |   25.31 ms |   25.31 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   31.36 us |   31.36 us |    0.00 ns |     0.00 |   31.36 us |   31.36 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    5.15 ms |    4.90 ms |    4.31 ms |     0.09 |    1.37 us |   10.54 ms |   10.54 ms |          0 |
+| 1) Write             |         1 |    27.74 s |    27.74 s |    0.00 ns |     0.00 |    27.74 s |    27.74 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   88.89 ms |   88.89 ms |    0.00 ns |     0.00 |   88.89 ms |   88.89 ms |    0.00 ns |          0 |
+| 1.2) Write Loop      |     65534 |  466.86 ns |  450.00 ns |  447.30 ns |    58.27 |   60.00 ns |   41.62 us |   41.56 us |          2 |
+| 1.3) Write SaveIndex |         1 |     1.81 s |     1.81 s |    0.00 ns |     0.00 |     1.81 s |     1.81 s |    0.00 ns |          0 |
+| 0) Rng chars         |     65528 |   94.89 ns |   10.00 ns |  164.35 ns |     2.42 |    0.21 ns |    3.82 us |    3.82 us |          8 |
 | Global               |         1 |    32.35 s |    32.35 s |    0.00 ns |     0.00 |    32.35 s |    32.35 s |    0.00 ns |          0 |
 #========================================================================================================================================#
-Searching took: 1.20 s
+Searching took: 19.70 ms
 Total Rows: 59.41 M
 
 /* -------------------------------------------- Iterative AVX512 + bloom(fnv1a) (single thread)
 ./bin/fastsearch_fnv1a
-[16:55:00] use Iterative AVX512 + fnv1a
+[20:23:30] Iterative AVX512 + fnv1a
 Warning in <ROOT_TImplicitMT_DisableImplicitMT>: Implicit multi-threading is already disabled
 [Sys] Found 4 users named: alice
    Within a database made of 59406880 users
@@ -70,20 +70,20 @@ Warning in <ROOT_TImplicitMT_DisableImplicitMT>: Implicit multi-threading is alr
 #========================================================================================================================================#
 | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |    OUTLIER |
 |----------------------------------------------------------------------------------------------------------------------------------------|
-| 2) Search            |         1 |  302.13 ms |  302.13 ms |    0.00 ns |     0.00 |  302.13 ms |  302.13 ms |    0.00 ns |          0 |
-| 2.1) SIMD body       |         1 |  296.96 ms |  296.96 ms |    0.00 ns |     0.00 |  296.96 ms |  296.96 ms |    0.00 ns |          0 |
-| 2.1.1) unroll bloom  |         3 |   67.19 ms |   72.35 ms |   51.31 ms |    -0.15 |    1.93 ms |  127.29 ms |  125.35 ms |          0 |
-| 2.2) SIMD tail       |         1 |    0.21 ns |    0.21 ns |    0.00 ns |     0.00 |    0.21 ns |    0.21 ns |    0.00 ns |          0 |
-| 1) Write             |         1 |     4.03 s |     4.03 s |    0.00 ns |     0.00 |     4.03 s |     4.03 s |    0.00 ns |          0 |
-| 1.1) Write init      |         1 |   88.71 ms |   88.71 ms |    0.00 ns |     0.00 |   88.71 ms |   88.71 ms |    0.00 ns |          0 |
-| 1.2) Write Loop      |     65525 |   55.01 ns |   50.00 ns |   10.53 ns |     5.70 |   50.00 ns |  220.00 ns |  170.00 ns |         11 |
-| 0) Rng chars         |     65535 |   10.98 ns |    9.79 ns |   10.05 ns |     1.75 |    0.21 ns |  120.00 ns |  119.79 ns |          1 |
-| 3) Read              |         1 |   23.46 ms |   23.46 ms |    0.00 ns |     0.00 |   23.46 ms |   23.46 ms |    0.00 ns |          0 |
-| 3.1) Read Init       |         1 |   16.21 us |   16.21 us |    0.00 ns |     0.00 |   16.21 us |   16.21 us |    0.00 ns |          0 |
-| 3.2) Read Findings   |         3 |    5.29 ms |    2.94 ms |    4.03 ms |     0.68 |    1.96 ms |   10.97 ms |    9.01 ms |          0 |
-| Global               |         1 |     4.48 s |     4.48 s |    0.00 ns |     0.00 |     4.48 s |     4.48 s |    0.00 ns |          0 |
+| 2) Search            |         1 |  296.69 ms |  296.69 ms |    0.00 ns |     0.00 |  296.69 ms |  296.69 ms |    0.00 ns |          0 |
+| 2.1) SIMD body       |         1 |  296.68 ms |  296.68 ms |    0.00 ns |     0.00 |  296.68 ms |  296.68 ms |    0.00 ns |          0 |
+| 2.1.1) unroll bloom  |         3 |   66.16 ms |   70.85 ms |   52.08 ms |    -0.13 |  162.81 us |  127.47 ms |  127.31 ms |          0 |
+| 2.2) SIMD tail       |         1 |   20.00 ns |   20.00 ns |    0.00 ns |     0.00 |   20.00 ns |   20.00 ns |    0.00 ns |          0 |
+| 3) Read              |         1 |   25.79 ms |   25.79 ms |    0.00 ns |     0.00 |   25.79 ms |   25.79 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   19.37 us |   19.37 us |    0.00 ns |     0.00 |   19.37 us |   19.37 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    5.43 ms |    4.87 ms |    4.68 ms |     0.18 |    1.87 us |   11.42 ms |   11.42 ms |          0 |
+| 1) Write             |         1 |     3.64 s |     3.64 s |    0.00 ns |     0.00 |     3.64 s |     3.64 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   77.05 ms |   77.05 ms |    0.00 ns |     0.00 |   77.05 ms |   77.05 ms |    0.00 ns |          0 |
+| 1.2) Write Loop      |     65533 |   51.38 ns |   50.00 ns |   30.19 ns |    47.37 |   40.00 ns |    3.33 us |    3.29 us |          3 |
+| 0) Rng chars         |     65522 |   10.16 ns |    9.79 ns |    9.15 ns |     4.52 |    0.21 ns |  429.79 ns |  429.58 ns |         14 |
+| Global               |         1 |     4.11 s |     4.11 s |    0.00 ns |     0.00 |     4.11 s |     4.11 s |    0.00 ns |          0 |
 #========================================================================================================================================#
-Searching took: 302.13 ms
+Searching took: 296.69 ms
 [Expected] RNtuple search take 4.89 ms per 1M iters 
 Total Rows: 59.41 M
 */
@@ -93,7 +93,7 @@ Total Rows: 59.41 M
 
 /* ---------------------------------------------------Iterative AVX512 + bloom(First, Second and Last char) (single thread)
 ./bin/fastsearch_fsl
-[17:40:00] use Iterative AVX512 + FSL
+[20:24:39] Iterative AVX512 + FSL
 Warning in <ROOT_TImplicitMT_DisableImplicitMT>: Implicit multi-threading is already disabled
 [Sys] Found 4 users named: alice
    Within a database made of 59406880 users
@@ -107,22 +107,22 @@ Warning in <ROOT_TImplicitMT_DisableImplicitMT>: Implicit multi-threading is alr
 #========================================================================================================================================#
 | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |    OUTLIER |
 |----------------------------------------------------------------------------------------------------------------------------------------|
-| 2) Search            |         1 |  623.22 ms |  623.22 ms |    0.00 ns |     0.00 |  623.22 ms |  623.22 ms |    0.00 ns |          0 |
-| 2.1) SIMD body       |         1 |  618.11 ms |  618.11 ms |    0.00 ns |     0.00 |  618.11 ms |  618.11 ms |    0.00 ns |          0 |
-| 2.1.1) unroll bloom  |      3275 |  186.63 us |  130.95 us |  188.29 us |     2.16 |   10.00 ns |    1.80 ms |    1.80 ms |          0 |
-| 2.2) SIMD tail       |         1 |   12.49 us |   12.49 us |    0.00 ns |     0.00 |   12.49 us |   12.49 us |    0.00 ns |          0 |
-| 2.2.1) Tail          |        31 |   22.26 ns |   10.00 ns |   51.22 ns |     5.13 |    0.21 ns |  300.00 ns |  299.79 ns |          0 |
-| 3) Read              |         1 |   25.90 ms |   25.90 ms |    0.00 ns |     0.00 |   25.90 ms |   25.90 ms |    0.00 ns |          0 |
-| 3.1) Read Init       |         1 |   27.25 us |   27.25 us |    0.00 ns |     0.00 |   27.25 us |   27.25 us |    0.00 ns |          0 |
-| 3.2) Read Findings   |         3 |    5.49 ms |    5.13 ms |    4.64 ms |     0.12 |    1.72 us |   11.34 ms |   11.34 ms |          0 |
-| 1) Write             |         1 |     3.63 s |     3.63 s |    0.00 ns |     0.00 |     3.63 s |     3.63 s |    0.00 ns |          0 |
-| 1.1) Write init      |         1 |   87.18 ms |   87.18 ms |    0.00 ns |     0.00 |   87.18 ms |   87.18 ms |    0.00 ns |          0 |
-| 1.2) Write Loop      |     65534 |   51.46 ns |   50.00 ns |   33.83 ns |    54.37 |   40.00 ns |    3.68 us |    3.64 us |          2 |
-| 0) Rng chars         |     65522 |   10.22 ns |    9.79 ns |    9.53 ns |     8.89 |    0.21 ns |  710.21 ns |  710.00 ns |         14 |
-| Global               |         1 |     4.42 s |     4.42 s |    0.00 ns |     0.00 |     4.42 s |     4.42 s |    0.00 ns |          0 |
+| 2) Search            |         1 |  662.83 ms |  662.83 ms |    0.00 ns |     0.00 |  662.83 ms |  662.83 ms |    0.00 ns |          0 |
+| 2.1) SIMD body       |         1 |  662.81 ms |  662.81 ms |    0.00 ns |     0.00 |  662.81 ms |  662.81 ms |    0.00 ns |          0 |
+| 2.1.1) unroll bloom  |      3275 |  200.28 us |  140.31 us |  202.01 us |     2.15 |   10.00 ns |    1.90 ms |    1.90 ms |          0 |
+| 2.2) SIMD tail       |         1 |   11.86 us |   11.86 us |    0.00 ns |     0.00 |   11.86 us |   11.86 us |    0.00 ns |          0 |
+| 2.2.1) Tail          |        31 |   24.84 ns |   10.00 ns |   45.21 ns |     4.11 |    0.21 ns |  250.00 ns |  249.79 ns |          0 |
+| 3) Read              |         1 |   25.44 ms |   25.44 ms |    0.00 ns |     0.00 |   25.44 ms |   25.44 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   25.77 us |   25.77 us |    0.00 ns |     0.00 |   25.77 us |   25.77 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    5.34 ms |    4.99 ms |    4.50 ms |     0.11 |    1.51 us |   11.01 ms |   11.01 ms |          0 |
+| 1) Write             |         1 |     3.70 s |     3.70 s |    0.00 ns |     0.00 |     3.70 s |     3.70 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   90.21 ms |   90.21 ms |    0.00 ns |     0.00 |   90.21 ms |   90.21 ms |    0.00 ns |          0 |
+| 1.2) Write Loop      |     65534 |   52.23 ns |   50.00 ns |   33.02 ns |    56.67 |   40.00 ns |    3.95 us |    3.91 us |          2 |
+| 0) Rng chars         |     65522 |   10.23 ns |    9.79 ns |    9.17 ns |     4.22 |    0.21 ns |  410.00 ns |  409.79 ns |         14 |
+| Global               |         1 |     4.54 s |     4.54 s |    0.00 ns |     0.00 |     4.54 s |     4.54 s |    0.00 ns |          0 |
 #========================================================================================================================================#
-Searching took: 623.22 ms
-[Expected] RNtuple search take 10.43 ms per 1M iters 
+Searching took: 662.83 ms
+[Expected] RNtuple search take 11.06 ms per 1M iters 
 Total Rows: 59.41 M
 */
 
@@ -130,7 +130,7 @@ Total Rows: 59.41 M
 
 /* --------------------------------------- Iterative memcmp for const size (single thread) O(n)
 ./bin/fastsearch_const
-[17:40:48] use Iterative const size
+[20:25:30] Iterative const size
 Warning in <ROOT_TImplicitMT_DisableImplicitMT>: Implicit multi-threading is already disabled
 [Sys] Found 4 users named: alice
    Within a database made of 59406880 users
@@ -144,24 +144,24 @@ Warning in <ROOT_TImplicitMT_DisableImplicitMT>: Implicit multi-threading is alr
 #========================================================================================================================================#
 | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |    OUTLIER |
 |----------------------------------------------------------------------------------------------------------------------------------------|
-| 2) Search            |         1 |  660.78 ms |  660.78 ms |    0.00 ns |     0.00 |  660.78 ms |  660.78 ms |    0.00 ns |          0 |
-| 3) Read              |         1 |   25.49 ms |   25.49 ms |    0.00 ns |     0.00 |   25.49 ms |   25.49 ms |    0.00 ns |          0 |
-| 3.1) Read Init       |         1 |   26.63 us |   26.63 us |    0.00 ns |     0.00 |   26.63 us |   26.63 us |    0.00 ns |          0 |
-| 3.2) Read Findings   |         3 |    5.31 ms |    4.94 ms |    4.50 ms |     0.12 |    1.79 us |   11.00 ms |   11.00 ms |          0 |
-| 1) Write             |         1 |     3.70 s |     3.70 s |    0.00 ns |     0.00 |     3.70 s |     3.70 s |    0.00 ns |          0 |
-| 1.1) Write init      |         1 |   87.39 ms |   87.39 ms |    0.00 ns |     0.00 |   87.39 ms |   87.39 ms |    0.00 ns |          0 |
-| 1.2) Write Loop      |     65534 |   51.56 ns |   50.00 ns |   31.64 ns |    50.58 |   40.00 ns |    3.28 us |    3.24 us |          2 |
-| 0) Rng chars         |     65522 |   10.24 ns |    9.79 ns |    9.31 ns |     4.13 |    0.21 ns |  410.00 ns |  409.79 ns |         14 |
-| Global               |         1 |     4.52 s |     4.52 s |    0.00 ns |     0.00 |     4.52 s |     4.52 s |    0.00 ns |          0 |
+| 2) Search            |         1 |  662.19 ms |  662.19 ms |    0.00 ns |     0.00 |  662.19 ms |  662.19 ms |    0.00 ns |          0 |
+| 3) Read              |         1 |   25.94 ms |   25.94 ms |    0.00 ns |     0.00 |   25.94 ms |   25.94 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   28.78 us |   28.78 us |    0.00 ns |     0.00 |   28.78 us |   28.78 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    5.46 ms |    5.01 ms |    4.65 ms |     0.14 |    3.77 us |   11.36 ms |   11.36 ms |          0 |
+| 1) Write             |         1 |     3.69 s |     3.69 s |    0.00 ns |     0.00 |     3.69 s |     3.69 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   88.38 ms |   88.38 ms |    0.00 ns |     0.00 |   88.38 ms |   88.38 ms |    0.00 ns |          0 |
+| 1.2) Write Loop      |     65534 |   52.46 ns |   50.00 ns |   37.30 ns |    56.30 |   40.00 ns |    3.82 us |    3.78 us |          2 |
+| 0) Rng chars         |     65521 |   10.33 ns |    9.79 ns |    9.39 ns |     4.64 |    0.21 ns |  450.00 ns |  449.79 ns |         15 |
+| Global               |         1 |     4.51 s |     4.51 s |    0.00 ns |     0.00 |     4.51 s |     4.51 s |    0.00 ns |          0 |
 #========================================================================================================================================#
-Searching took: 660.78 ms
+Searching took: 662.19 ms
 [Expected] RNtuple search take 11.06 ms per 1M iters 
 Total Rows: 59.41 M
 */
 
 /*
-./bin/fastsearch_bin
-[14:51:33] Binary Search
+./bin/fastsearch_nbin
+[19:54:43] New Binary Search, bittrick only
 Warning in <ROOT_TImplicitMT_DisableImplicitMT>: Implicit multi-threading is already disabled
 [Sys] Found 4 users named: alice
    Within a database made of 59406880 users
@@ -175,29 +175,67 @@ Warning in <ROOT_TImplicitMT_DisableImplicitMT>: Implicit multi-threading is alr
 #========================================================================================================================================#
 | COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |    OUTLIER |
 |----------------------------------------------------------------------------------------------------------------------------------------|
-| 2) Search            |         1 |   24.44 ms |   24.44 ms |    0.00 ns |     0.00 |   24.44 ms |   24.44 ms |    0.00 ns |          0 |
-| 3) Read              |         1 |    4.74 ms |    4.74 ms |    0.00 ns |     0.00 |    4.74 ms |    4.74 ms |    0.00 ns |          0 |
-| 3.1) Read Init       |         1 |   16.67 us |   16.67 us |    0.00 ns |     0.00 |   16.67 us |   16.67 us |    0.00 ns |          0 |
-| 3.2) Read Findings   |         3 |    1.98 us |    2.13 us |  557.70 ns |    -0.39 |    1.23 us |    2.57 us |    1.34 us |          0 |
-| 1) Write             |         1 |     3.71 s |     3.71 s |    0.00 ns |     0.00 |     3.71 s |     3.71 s |    0.00 ns |          0 |
-| 1.1) Write init      |         1 |   78.35 ms |   78.35 ms |    0.00 ns |     0.00 |   78.35 ms |   78.35 ms |    0.00 ns |          0 |
-| 1.2) Write Loop      |     65531 |   51.75 ns |   50.00 ns |   32.43 ns |    50.95 |   40.00 ns |    3.41 us |    3.37 us |          5 |
-| 0) Rng chars         |     65522 |   10.22 ns |    9.79 ns |    9.20 ns |     4.51 |    0.21 ns |  440.21 ns |  440.00 ns |         14 |
-| Sort RNTuple         |         1 |     7.03 s |     7.03 s |    0.00 ns |     0.00 |     7.03 s |     7.03 s |    0.00 ns |          0 |
-| Reading              |         1 |     2.15 s |     2.15 s |    0.00 ns |     0.00 |     2.15 s |     2.15 s |    0.00 ns |          0 |
-| Sorting              |         1 |     3.25 s |     3.25 s |    0.00 ns |     0.00 |     3.25 s |     3.25 s |    0.00 ns |          0 |
-| Writing sorted data  |         1 |     1.63 s |     1.63 s |    0.00 ns |     0.00 |     1.63 s |     1.63 s |    0.00 ns |          0 |
-| 2.1) Body            |         1 |   18.81 ms |   18.81 ms |    0.00 ns |     0.00 |   18.81 ms |   18.81 ms |    0.00 ns |          0 |
-| 2.1.1) BODY LOOP     |        25 |  452.05 us |   10.00 ns |  603.57 us |     0.59 |    0.21 ns |    1.40 ms |    1.40 ms |          0 |
-| 2.2) tail            |         1 |   70.00 ns |   70.00 ns |    0.00 ns |     0.00 |   70.00 ns |   70.00 ns |    0.00 ns |          0 |
-| 2.3) Deblooming      |         1 |  534.16 us |  534.16 us |    0.00 ns |     0.00 |  534.16 us |  534.16 us |    0.00 ns |          0 |
-| Global               |         1 |    10.97 s |    10.97 s |    0.00 ns |     0.00 |    10.97 s |    10.97 s |    0.00 ns |          0 |
+| 2) Search            |         1 |   19.41 ms |   19.41 ms |    0.00 ns |     0.00 |   19.41 ms |   19.41 ms |    0.00 ns |          0 |
+| 3) Read              |         1 |    4.57 ms |    4.57 ms |    0.00 ns |     0.00 |    4.57 ms |    4.57 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   18.27 us |   18.27 us |    0.00 ns |     0.00 |   18.27 us |   18.27 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    1.43 us |    1.01 us |  737.13 ns |     0.67 |  820.00 ns |    2.47 us |    1.65 us |          0 |
+| 1) Write             |         1 |     3.69 s |     3.69 s |    0.00 ns |     0.00 |     3.69 s |     3.69 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   90.72 ms |   90.72 ms |    0.00 ns |     0.00 |   90.72 ms |   90.72 ms |    0.00 ns |          0 |
+| 1.2) Write Loop      |     65534 |   52.08 ns |   50.00 ns |   30.90 ns |    46.49 |   40.00 ns |    3.31 us |    3.27 us |          2 |
+| 0) Rng chars         |     65522 |   10.37 ns |    9.79 ns |    9.63 ns |     4.95 |    0.21 ns |  440.21 ns |  440.00 ns |         14 |
+| Sort RNTuple         |         1 |     7.05 s |     7.05 s |    0.00 ns |     0.00 |     7.05 s |     7.05 s |    0.00 ns |          0 |
+| Reading              |         1 |     2.16 s |     2.16 s |    0.00 ns |     0.00 |     2.16 s |     2.16 s |    0.00 ns |          0 |
+| Sorting              |         1 |     3.26 s |     3.26 s |    0.00 ns |     0.00 |     3.26 s |     3.26 s |    0.00 ns |          0 |
+| Writing sorted data  |         1 |     1.64 s |     1.64 s |    0.00 ns |     0.00 |     1.64 s |     1.64 s |    0.00 ns |          0 |
+| 2.1) Body            |         1 |   18.80 ms |   18.80 ms |    0.00 ns |     0.00 |   18.80 ms |   18.80 ms |    0.00 ns |          0 |
+| 2.2) tail            |         1 |   60.00 ns |   60.00 ns |    0.00 ns |     0.00 |   60.00 ns |   60.00 ns |    0.00 ns |          0 |
+| 2.3) Deblooming      |         1 |  580.91 us |  580.91 us |    0.00 ns |     0.00 |  580.91 us |  580.91 us |    0.00 ns |          0 |
+| Global               |         1 |    10.96 s |    10.96 s |    0.00 ns |     0.00 |    10.96 s |    10.96 s |    0.00 ns |          0 |
 #========================================================================================================================================#
-Searching took: 24.44 ms
+Searching took: 19.41 ms
 [Expected] RNtuple search take 212.77 us per 1M iters 
 Total Rows: 59.41 M
 */
 
+/* Doesnt contain NotFound logic, but can use counter, binary search have predictible iterations
+./bin/fastsearch_obin
+[20:08:06] Old Binary Search with add/sub
+Warning in <ROOT_TImplicitMT_DisableImplicitMT>: Implicit multi-threading is already disabled
+[Sys] Found 4 users named: alice
+   Within a database made of 59406880 users
+ [User]: alice [Age]: 45
+ [User]: alice [Age]: 30
+ [User]: alice [Age]: 61
+ [User]: alice [Age]: 19
+
+#========================================================================================================================================#
+| LATTE TELEMETRY [TIME][RAW]                                                                                                            |
+#========================================================================================================================================#
+| COMPONENT            |   SAMPLES |        AVG |     MEDIAN |    STD DEV |     SKEW |        MIN |        MAX |      RANGE |    OUTLIER |
+|----------------------------------------------------------------------------------------------------------------------------------------|
+| 2) Search            |         1 |   19.21 ms |   19.21 ms |    0.00 ns |     0.00 |   19.21 ms |   19.21 ms |    0.00 ns |          0 |
+| 3) Read              |         1 |    5.02 ms |    5.02 ms |    0.00 ns |     0.00 |    5.02 ms |    5.02 ms |    0.00 ns |          0 |
+| 3.1) Read Init       |         1 |   17.17 us |   17.17 us |    0.00 ns |     0.00 |   17.17 us |   17.17 us |    0.00 ns |          0 |
+| 3.2) Read Findings   |         3 |    1.94 us |    1.82 us |  630.05 ns |     0.27 |    1.23 us |    2.76 us |    1.53 us |          0 |
+| 1) Write             |         1 |     3.64 s |     3.64 s |    0.00 ns |     0.00 |     3.64 s |     3.64 s |    0.00 ns |          0 |
+| 1.1) Write init      |         1 |   77.62 ms |   77.62 ms |    0.00 ns |     0.00 |   77.62 ms |   77.62 ms |    0.00 ns |          0 |
+| 1.2) Write Loop      |     65534 |   51.38 ns |   50.00 ns |   30.09 ns |    49.43 |   40.00 ns |    3.48 us |    3.44 us |          2 |
+| 0) Rng chars         |     65522 |   10.19 ns |    9.79 ns |    9.18 ns |     4.35 |    0.21 ns |  430.00 ns |  429.79 ns |         14 |
+| Sort RNTuple         |         1 |     7.17 s |     7.17 s |    0.00 ns |     0.00 |     7.17 s |     7.17 s |    0.00 ns |          0 |
+| Reading              |         1 |     2.20 s |     2.20 s |    0.00 ns |     0.00 |     2.20 s |     2.20 s |    0.00 ns |          0 |
+| Sorting              |         1 |     3.30 s |     3.30 s |    0.00 ns |     0.00 |     3.30 s |     3.30 s |    0.00 ns |          0 |
+| Writing sorted data  |         1 |     1.67 s |     1.67 s |    0.00 ns |     0.00 |     1.67 s |     1.67 s |    0.00 ns |          0 |
+| 2.1) Body            |         1 |   18.65 ms |   18.65 ms |    0.00 ns |     0.00 |   18.65 ms |   18.65 ms |    0.00 ns |          0 |
+| 2.1.1) BODY LOOP     |        25 |  444.60 us |   10.00 ns |  592.87 us |     0.58 |    0.21 ns |    1.28 ms |    1.28 ms |          0 |
+| 2.2) tail            |         1 |   80.00 ns |   80.00 ns |    0.00 ns |     0.00 |   80.00 ns |   80.00 ns |    0.00 ns |          0 |
+| 2.3) Deblooming      |         1 |  531.15 us |  531.15 us |    0.00 ns |     0.00 |  531.15 us |  531.15 us |    0.00 ns |          0 |
+| Global               |         1 |    11.17 s |    11.17 s |    0.00 ns |     0.00 |    11.17 s |    11.17 s |    0.00 ns |          0 |
+#========================================================================================================================================#
+Searching took: 19.21 ms
+[Expected] RNtuple search take 212.77 us per 1M iters 
+Total Rows: 59.41 M
+
+*/
 
 /*
 == CPU ==
@@ -471,7 +509,6 @@ struct SearchResult{
 
 //---------------------------------------------------------------------------------------------
 auto SIMD_FSL_Search(const char (&tName)[name_len]) -> SearchResult{
-  Latte::Mid::Start("2) Search");
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
 
@@ -480,6 +517,7 @@ auto SIMD_FSL_Search(const char (&tName)[name_len]) -> SearchResult{
   std::vector<uint64_t> matches;
   matches.reserve(10);
 
+  Latte::Mid::Start("2) Search");
   __m512i tar_firstB = _mm512_set1_epi8(tName[0]);
   __m512i tar_secB   = _mm512_set1_epi8(tName[1]);
   __m512i tar_lastB  = _mm512_set1_epi8(tName[name_len - 1]);
@@ -529,7 +567,6 @@ auto SIMD_FSL_Search(const char (&tName)[name_len]) -> SearchResult{
 
 //---------------------------------------------------------------------------------------------
 auto SIMD_fnv1a_Search(const char (&tName)[name_len]) -> SearchResult{
-  Latte::Mid::Start("2) Search");
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
 
@@ -539,6 +576,7 @@ auto SIMD_fnv1a_Search(const char (&tName)[name_len]) -> SearchResult{
   std::vector<uint64_t> matches;
   matches.reserve(10);
 
+  Latte::Mid::Start("2) Search");
   __m512i tar_hashed = _mm512_set1_epi32(static_cast<int>(fnv1a(tName, name_len)));
   alignas(64) uint32_t hashed[16];
 
@@ -579,14 +617,14 @@ auto SIMD_fnv1a_Search(const char (&tName)[name_len]) -> SearchResult{
 
 //---------------------------------------------------------------------------------------------
 auto O1Search(const char (&tName)[name_len]) -> SearchResult {
-  Latte::Mid::Start("2) Search");
-  Latte::Fast::Start("2.1) Search LoadIndex");
+  Latte::Fast::Start("LoadIndex");
   auto index = loadIndex("./data/search/users.idx");
-  Latte::Fast::Stop("2.1) Search LoadIndex");
+  Latte::Fast::Stop("LoadIndex");
 
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vName = reader->GetView<std::array<char, name_len>>("name");
 
+  Latte::Mid::Start("2) Search");
   uint32_t target = fnv1a(tName, name_len);
   Latte::Fast::Start("2.2) Search find");
   std::vector<uint64_t> matches;
@@ -605,7 +643,6 @@ auto O1Search(const char (&tName)[name_len]) -> SearchResult {
 
 //---------------------------------------------------------------------------------------------
 auto ConstSearch(const char (&tName)[name_len]) -> SearchResult {
-  Latte::Mid::Start("2) Search");
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vName = reader->GetView<std::array<char, name_len>>("name");
@@ -615,6 +652,9 @@ auto ConstSearch(const char (&tName)[name_len]) -> SearchResult {
 
   char xa[name_len];
   char xb[name_len];
+
+  Latte::Mid::Start("2) Search");
+
   std::memcpy(xa, tName, name_len);
   for (uint64_t i = 0; i < nEntries; ++i) {
     const auto& iname = vName(i);
@@ -627,9 +667,11 @@ auto ConstSearch(const char (&tName)[name_len]) -> SearchResult {
 
 //---------------------------------------------------------------------------------------------
 
-auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
+
+
+
+auto NewBinarySearch(const char (&tName)[name_len]) -> SearchResult {
   sortAndSaveRNTuple();
-  Latte::Mid::Start("2) Search");
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vHName = reader->GetDirectAccessView<uint32_t>("hash_name");
@@ -639,11 +681,14 @@ auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
 
   std::vector<uint64_t> candidates;
   candidates.reserve(10);
-  if (nEntries == 0) return SearchResult(std::move(reader), std::move(candidates), tName);
 
+  
+  Latte::Mid::Start("2) Search");
+  
   const uint32_t key = fnv1a(tName, name_len);
 
   Latte::Mid::Start("2.1) Body");
+  
   uint64_t base = 0; // base idx
   uint64_t len  = nEntries;
   while (len > 1) {
@@ -651,17 +696,11 @@ auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
     const uint32_t value = vHName(base + half - 1);
     base += half & (uint64_t)(-(int64_t)(value < key)); // 0,1 -> 0,-1 -> 0,0xFF.. -> base+=0, base+=half
     len -= half;
-    //LATTE_PULSE("2.1.1) BODY LOOP");
-  } base += (uint64_t)(vHName(base) < key);
-  /*
-   idx=0
-   next= n>>1
-   while(next)
-    idx += next
-    next &= 0x7FFFF (0x7: 0111, it set signbit=0) 
-    cmp = memcmp(...)
-    next = ((cmp>0)-(cmp<0) * (next>>1)) //sign * next/2
-  */
+    LATTE_PULSE("2.1.1) BODY LOOP");
+  } 
+  base += (uint64_t)(vHName(base) < key);
+
+
   Latte::Mid::Stop("2.1) Body");
 
   Latte::Mid::Start("2.2) tail");
@@ -678,6 +717,62 @@ auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
   return SearchResult(std::move(reader), std::move(candidates), tName);
 }
 
+
+
+
+
+
+auto OldBinarySearch(const char (&tName)[name_len]) -> SearchResult {
+  sortAndSaveRNTuple();
+  ROOT::DisableImplicitMT();
+  auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
+  auto vHName = reader->GetDirectAccessView<uint32_t>("hash_name");
+  auto vName = reader->GetView<std::array<char, name_len>>("name");
+
+  const uint64_t nEntries = reader->GetNEntries();
+
+  std::vector<uint64_t> candidates;
+  candidates.reserve(10);
+  
+  uint32_t key = fnv1a(tName, 5);
+  
+  Latte::Mid::Start("2) Search");
+  Latte::Mid::Start("2.1) Body");
+  uint64_t idx = 0;
+  uint64_t step = nEntries;
+  while (step > 1) {
+    step = (step + 1) >> 1;  // ceil(step/2)
+    const uint64_t probe = idx + step - 1;
+    const uint64_t cmp = (vHName(probe) < key);  // 1 if probe < key, 0 otherwise
+    idx += cmp * step;  // move forward only if probe < key
+    LATTE_PULSE("2.1.1) BODY LOOP");
+  }  
+  /*
+    idx+=next_half; //add or sub
+    auto cmp = key - vHName(idx);
+    next_half &=0x7FFFFFFFFFFFFFFFLL; //reset sign
+    next_half = ((cmp>0)-(cmp<0) * (next_half>>1)); //sign from cmp
+*/
+  Latte::Mid::Stop("2.1) Body");
+
+  Latte::Mid::Start("2.2) tail");
+  for (uint64_t i = idx; i < nEntries && vHName(i) == key; ++i) candidates.push_back(i);
+  Latte::Mid::Stop("2.2) tail");
+
+  Latte::Fast::Start("2.3) Deblooming");
+  for (size_t i = 0; i < candidates.size(); ) {
+    if (std::memcmp(tName, vName(candidates[i]).data(), name_len) != 0) {
+      candidates.erase(candidates.begin() + i);
+    } else {
+      ++i;
+    }
+  }
+  Latte::Fast::Stop("2.3) Deblooming");
+  Latte::Mid::Stop("2) Search");
+  return SearchResult(std::move(reader), std::move(candidates), tName);
+}
+
+
 //---------------------------------------------------------------------------------------------
 
 template <class T>
@@ -686,35 +781,35 @@ static inline void DoNotOptimize(const T& v) {
 }
 
 auto NoSearch(const char (&tName)[name_len]) -> SearchResult {
-  Latte::Mid::Start("2) Search");
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vName = reader->GetView<std::array<char, name_len>>("name");
   const auto nEntries = reader->GetNEntries();
 
+  Latte::Mid::Start("2) Search");
   for (uint64_t i = 0; i < nEntries; ++i) {
     const auto& s = vName(i);
     DoNotOptimize(s.front()); // iterations cost 
   }
-
   Latte::Hard::Stop("2) Search");
+  
   return SearchResult(std::move(reader), std::vector<uint64_t>{}, tName);
 }
 
 
 auto NoSearchHash(const char (&tName)[name_len]) -> SearchResult {
-  Latte::Mid::Start("2) Search");
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vhashView = reader->GetDirectAccessView<uint32_t>("hash_name");
   const auto nEntries = reader->GetNEntries();
 
+  Latte::Mid::Start("2) Search");
   for (uint64_t i = 0; i < nEntries; ++i) {
     const auto& s = vhashView(i);
     DoNotOptimize(s); // iterations cost 
   }
-
   Latte::Hard::Stop("2) Search");
+  
   return SearchResult(std::move(reader), std::vector<uint64_t>{}, tName);
 }
 
@@ -754,8 +849,10 @@ auto main() -> int{
   std::cout << "[" << __TIME__ << "] Iterative AVX512 + fnv1a" << std::endl;
 #elif RUN_CONSTSEARCH
   std::cout << "[" << __TIME__ << "] Iterative const size"  << std::endl;
-#elif RUN_BINARYSEARCH
-  std::cout << "[" << __TIME__ << "] Binary Search"  << std::endl;
+#elif RUN_NEWBINARYSEARCH
+  std::cout << "[" << __TIME__ << "] New Binary Search, additive only"  << std::endl;
+#elif RUN_OLDBINARYSEARCH
+  std::cout << "[" << __TIME__ << "] Old Binary Search with add/sub"  << std::endl;
 #elif RUN_NOSEARCH
   std::cout << "[" << __TIME__ << "] Baseline cost of iterating over RNTuple"  << std::endl;
 #elif RUN_NOSEARCHHash
@@ -780,8 +877,10 @@ auto main() -> int{
   Sresult = SIMD_fnv1a_Search(tName); // AVX512 with bloom fnv1a hashing
 #elif RUN_CONSTSEARCH
   Sresult = ConstSearch(tName); // constant name size
-#elif RUN_BINARYSEARCH
-  Sresult = BinarySearch(tName); // Log2(N) search
+#elif RUN_NEWBINARYSEARCH
+  Sresult = NewBinarySearch(tName); // Log2(N) search, bittrick based, additive-only
+#elif RUN_OLDBINARYSEARCH
+  Sresult = OldBinarySearch(tName); // Log2(N) search, memcmp based, add/sub
 #elif RUN_NOSEARCH
   Sresult = NoSearch(tName); // iterations cost, no search
 #elif RUN_NOSEARCHHASH
