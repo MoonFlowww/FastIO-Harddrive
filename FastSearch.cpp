@@ -228,6 +228,10 @@ Total Rows: 59.41 M
 #include <vector>
 #include <immintrin.h>
 #include <TROOT.h>
+#include <ROOT/RDataFrame.hxx>
+
+#include <ROOT/RNTupleReader.hxx>
+#include <ROOT/RNTupleWriter.hxx>
 
 #include "latte.hpp"
 
@@ -348,6 +352,70 @@ void write(){ Latte::Fast::Start("1) Write");
 #endif  
   Latte::Fast::Stop("1) Write");
 }
+
+
+
+void sortAndSaveRNTuple() {
+  Latte::Fast::Start("Sort RNTuple");
+
+  // Read the RNTuple
+  auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
+
+  auto viewName = reader->GetView<std::array<char, name_len>>("name");
+  auto viewHashName = reader->GetView<uint32_t>("hash_name");
+  auto viewAge = reader->GetView<int>("age");
+
+  struct User {
+    uint32_t hash_name;
+    std::array<char, name_len> name;
+    int age;
+  };
+
+  std::vector<User> users;
+
+  // Read all entries
+  Latte::Fast::Start("Reading");
+  for (auto i : reader->GetEntryRange()) {
+    users.push_back({
+      viewHashName(i),
+      viewName(i),
+      viewAge(i)
+    });
+  }
+  Latte::Fast::Stop("Reading");
+
+  Latte::Fast::Start("Sorting");
+  // Sort by hash_name
+  std::sort(users.begin(), users.end(), 
+            [](const User& a, const User& b) {
+            return a.hash_name < b.hash_name;
+            });
+  Latte::Fast::Stop("Sorting");
+
+  Latte::Fast::Start("Writing sorted data");
+  // Write back to new RNTuple
+  auto model = ROOT::RNTupleModel::Create();
+  auto fldName = model->MakeField<std::array<char, name_len>>("name");
+  auto fldHashName = model->MakeField<uint32_t>("hash_name");
+  auto fldAge = model->MakeField<int>("age");
+
+  ROOT::RNTupleWriteOptions opts;
+  opts.SetCompression(401);  // LZ4
+  auto writer = ROOT::RNTupleWriter::Recreate(
+    std::move(model), "Users", "./data/search/users.root", opts
+  );
+
+  for (const auto& user : users) {
+    *fldName = user.name;
+    *fldHashName = user.hash_name;
+    *fldAge = user.age;
+    writer->Fill();
+  }
+
+  Latte::Fast::Stop("Writing sorted data");
+  Latte::Fast::Stop("Sort RNTuple");
+}
+
 
 
 struct SearchResult{
@@ -520,6 +588,59 @@ auto ConstSearch(const char (&tName)[name_len]) -> SearchResult {
 
 //---------------------------------------------------------------------------------------------
 
+auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
+  sortAndSaveRNTuple();
+  Latte::Mid::Start("2) Search");
+  ROOT::DisableImplicitMT();
+  auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
+  auto vHName = reader->GetDirectAccessView<uint32_t>("hash_name");
+  auto vName = reader->GetView<std::array<char, name_len>>("name");
+
+  const uint64_t nEntries = reader->GetNEntries();
+
+  std::vector<uint64_t> candidates;
+  candidates.reserve(10);
+  if (nEntries == 0) return SearchResult(std::move(reader), std::move(candidates), tName);
+
+  const uint32_t key = fnv1a(tName, name_len);
+
+  Latte::Mid::Start("2.1) Body");
+  uint64_t base = 0; // base idx
+  uint64_t len  = nEntries;
+  while (len > 1) {
+    const uint64_t half = len >> 1;
+    const uint32_t value= vHName(base + half - 1);
+    base += half & (uint64_t)(-(int64_t)(value < key));
+    len  -= half;
+    LATTE_PULSE("2.1.1) BODY LOOP");
+  } base += (uint64_t)(vHName(base) < key);
+  /*
+   idx=0
+   next= n>>1
+   while(next)
+    idx += next
+    next = (uint)next // signbit=0
+    cmp = memcmp(...)
+    next = ((cmp<0)-(cmp>0) * (next>>1)) //sign * next/2
+  */
+  Latte::Mid::Stop("2.1) Body");
+
+  Latte::Mid::Start("2.2) tail");
+  for (uint64_t i = base; i < nEntries && vHName(i) == key; ++i) candidates.push_back(i);
+  Latte::Mid::Stop("2.2) tail");
+
+  Latte::Fast::Start("2.3) Deblooming");
+  for (size_t i = 0; i < candidates.size(); ) {
+    if (std::memcmp(tName, vName(candidates[i]).data(), name_len) == 0) candidates.erase(candidates.begin()+i);
+    else ++i;
+  }
+  Latte::Fast::Stop("2.3) Deblooming");
+  Latte::Mid::Stop("2) Search");
+  return SearchResult(std::move(reader), std::move(candidates), tName);
+}
+
+//---------------------------------------------------------------------------------------------
+
 template <class T>
 static inline void DoNotOptimize(const T& v) {
   asm volatile("" : : "r,m"(v) : "memory");
@@ -564,7 +685,7 @@ auto NoSearchHash(const char (&tName)[name_len]) -> SearchResult {
 void read(SearchResult& Sresult){
   Latte::Mid::Start("3) Read");
   Latte::Fast::Start("3.1) Read Init");
-  auto vName = Sresult.reader->GetDirectAccessView<std::array<char, name_len>>("name");
+  auto vName = Sresult.reader->GetView<std::array<char, name_len>>("name");
   auto vAge = Sresult.reader->GetDirectAccessView<int>("age");
   Latte::Fast::Stop("3.1) Read Init");
   std::cout 
@@ -589,11 +710,13 @@ auto main() -> int{
 #if RUN_O1SEARCH
   std::cout << "[" << __TIME__ << "] Use O(1) via unordered_map"  << std::endl;
 #elif RUN_SIMDFSLSEARCH
-  std::cout << "[" << __TIME__ << "] use Iterative AVX512 + FSL" << std::endl;
+  std::cout << "[" << __TIME__ << "] Iterative AVX512 + FSL" << std::endl;
 #elif RUN_SIMDFNV1ASEARCH
-  std::cout << "[" << __TIME__ << "] use Iterative AVX512 + fnv1a" << std::endl;
+  std::cout << "[" << __TIME__ << "] Iterative AVX512 + fnv1a" << std::endl;
 #elif RUN_CONSTSEARCH
-  std::cout << "[" << __TIME__ << "] use Iterative const size"  << std::endl;
+  std::cout << "[" << __TIME__ << "] Iterative const size"  << std::endl;
+#elif RUN_BINARYSEARCH
+  std::cout << "[" << __TIME__ << "] Binary Search"  << std::endl;
 #elif RUN_NOSEARCH
   std::cout << "[" << __TIME__ << "] Baseline cost of iterating over RNTuple"  << std::endl;
 #elif RUN_NOSEARCHHash
@@ -618,6 +741,8 @@ auto main() -> int{
   Sresult = SIMD_fnv1a_Search(tName); // AVX512 with bloom fnv1a hashing
 #elif RUN_CONSTSEARCH
   Sresult = ConstSearch(tName); // constant name size
+#elif RUN_BINARYSEARCH
+  Sresult = BinarySearch(tName); // Log2(N) search
 #elif RUN_NOSEARCH
   Sresult = NoSearch(tName); // iterations cost, no search
 #elif RUN_NOSEARCHHASH
