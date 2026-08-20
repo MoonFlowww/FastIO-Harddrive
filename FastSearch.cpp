@@ -1,10 +1,10 @@
 // Per 1M rows (2026-08-19, fixed per-1M formula: float division + measured cycles_per_ns)
 // O(1) unordered_map:  329.51 us  (total 19.57 ms; index load 1.12 s)
-// avx512 fnv1a:          4.95 ms   (   3 captures in bloom body, GetDirectAccessView hash, fixed size)
-// avx512 FSL:           10.49 ms   (3275 captures in bloom body)
+// avx512 fnv1a:          4.95 ms  (   3 captures in bloom body, GetDirectAccessView hash, fixed size)
+// avx512 FSL:           10.49 ms  (3275 captures in bloom body)
 // constsize:            11.21 ms
-// Additive Binary:     342.78 us   (25 iters, total 20.36 ms)
-// Add/Sub Binary:      322.73 us   (25 iters, total 19.17 ms)
+// Additive Binary:     342.78 us  (25 iters, total 20.36 ms)
+// Tree Binary Srch:      8.42 ns  (500ns total)
 
 // Raw Iterations Char[5]:    9.04 ms
 // Raw Iter Hash<uint32_t>:   4.70 ms
@@ -15,17 +15,6 @@
 
 // best optimization is compression at 401
 
-
-
-//TODO:
-//  -slice GPU decoding + unsync multithread for lightweight max speed
-//  - name column stays std::array<char,5> inside RNTuple (fixed-size array column);
-//    all search-side arrays are plain char[name_len]
-
-// Per-variant LATTE telemetry dumps removed (old results; their per-1M values came from
-// the buggy integer-truncated formula). Fresh numbers: summary table above + README.md.
-// Note: OldBinarySearch has no NotFound sentinel (use candidates.size()); binary search
-//       has a predictable iteration count.
 
 /*
 == CPU ==
@@ -77,17 +66,21 @@
 #include <ROOT/RFieldBase.hxx>
 #include <ROOT/RNTupleModel.hxx>
 #include <ROOT/RNTupleTypes.hxx>
+#include <ROOT/RNTupleView.hxx>
 #include <ROOT/RNTupleWriteOptions.hxx>
 #include <ROOT/RNTupleWriter.hxx>
 #include <ROOT/RNTupleReader.hxx>
 #include <TDictionary.h>
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <cstring>
+#include <iomanip>
 #include <memory>
 #include <mm_malloc.h>
 #include <ostream>
 #include <random>
+#include <sstream>
 #include <string_view>
 #include <sys/types.h>
 #include <unordered_map>
@@ -229,9 +222,9 @@ void sortAndSaveRNTuple() {
   // Read the RNTuple
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
 
-  auto viewName = reader->GetView<std::array<char, name_len>>("name");
-  auto viewHashName = reader->GetView<uint32_t>("hash_name");
-  auto viewAge = reader->GetView<int>("age");
+  auto vName = reader->GetView<std::array<char, name_len>>("name");
+  auto vHName = reader->GetView<uint32_t>("hash_name");
+  auto vAge = reader->GetView<int>("age");
 
   struct User {
     uint32_t hash_name;
@@ -245,9 +238,9 @@ void sortAndSaveRNTuple() {
   Latte::Fast::Start("Reading");
   for (auto i : reader->GetEntryRange()) {
     users.push_back({
-      viewHashName(i),
-      viewName(i),
-      viewAge(i)
+      vHName(i),
+      vName(i),
+      vAge(i)
     });
   }
   Latte::Fast::Stop("Reading");
@@ -362,25 +355,25 @@ auto SIMD_fnv1a_Search(const char (&tName)[name_len]) -> SearchResult{
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
 
   auto vName = reader->GetView<std::array<char, name_len>>("name");
-  auto vhashView = reader->GetDirectAccessView<uint32_t>("hash_name");
+  auto vHView = reader->GetDirectAccessView<uint32_t>("hash_name");
   const auto nEntries = reader->GetNEntries();
   std::vector<uint64_t> matches;
   matches.reserve(10);
 
   Latte::Mid::Start("2) Search");
-  __m512i tar_hashed = _mm512_set1_epi32(static_cast<int>(fnv1a(tName, name_len)));
+  __m512i key = _mm512_set1_epi32(static_cast<int>(fnv1a(tName, name_len)));
   alignas(64) uint32_t hashed[16];
 
   Latte::Fast::Start("2.1) SIMD body");
   uint64_t v = 0;
   for(; v+16<=nEntries; v+=16){
     for(uint32_t j = 0; j < 16; ++j){ // loading v64
-      const auto& h = vhashView(v+j);
+      const auto& h = vHView(v+j);
       hashed[j] = static_cast<uint32_t>(h);
     }
     __m512i vcan_hashed = _mm512_load_si512(hashed); // last step of loading
 
-    uint64_t mask = _mm512_cmpeq_epi32_mask(tar_hashed, vcan_hashed);
+    uint64_t mask = _mm512_cmpeq_epi32_mask(key, vcan_hashed);
 
     while(mask){ // unroll mask to save bloomed
       LATTE_PULSE("2.1.1) unroll bloom");
@@ -416,12 +409,11 @@ auto O1Search(const char (&tName)[name_len]) -> SearchResult {
   auto vName = reader->GetView<std::array<char, name_len>>("name");
 
   Latte::Mid::Start("2) Search");
-  uint32_t target = fnv1a(tName, name_len);
+  uint32_t key = fnv1a(tName, name_len);
   Latte::Fast::Start("2.2) Search find");
   std::vector<uint64_t> matches;
-  auto it = index.find(target); // O(1) hashmap lookup
+  auto it = index.find(key);
   if (it != index.end()) {
-    // fnv1a is 32-bit: different names can share a bucket, so confirm with memcmp.
     for (uint64_t row : it->second) {
       if (std::memcmp(tName, vName(row).data(), name_len) == 0) matches.push_back(row);
     }
@@ -438,8 +430,8 @@ auto ConstSearch(const char (&tName)[name_len]) -> SearchResult {
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vName = reader->GetView<std::array<char, name_len>>("name");
   const auto nEntries = reader->GetNEntries();
-  std::vector<uint64_t> candidates;
-  candidates.reserve(10);
+  std::vector<uint64_t> matches;
+  matches.reserve(10);
 
   char xa[name_len];
   char xb[name_len];
@@ -450,10 +442,10 @@ auto ConstSearch(const char (&tName)[name_len]) -> SearchResult {
   for (uint64_t i = 0; i < nEntries; ++i) {
     const auto& iname = vName(i);
     std::memcpy(xb, iname.data(), name_len);
-    if (std::memcmp(xa, xb, name_len) == 0) candidates.push_back(i);
+    if (std::memcmp(xa, xb, name_len) == 0) matches.push_back(i);
   }
   Latte::Hard::Stop("2) Search");
-  return SearchResult(std::move(reader), std::move(candidates), tName);
+  return SearchResult(std::move(reader), std::move(matches), tName);
 }
 
 //---------------------------------------------------------------------------------------------
@@ -461,8 +453,8 @@ auto ConstSearch(const char (&tName)[name_len]) -> SearchResult {
 
 
 
-auto NewBinarySearch(const char (&tName)[name_len]) -> SearchResult {
-  sortAndSaveRNTuple();
+auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
+  // NOTE: data must be hash-sorted before calling; main() runs sortAndSaveRNTuple() once.
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vHName = reader->GetDirectAccessView<uint32_t>("hash_name");
@@ -470,102 +462,119 @@ auto NewBinarySearch(const char (&tName)[name_len]) -> SearchResult {
 
   const uint64_t nEntries = reader->GetNEntries();
 
-  std::vector<uint64_t> candidates;
-  candidates.reserve(10);
+  std::vector<uint64_t> matches;
+  matches.reserve(10);
 
-  
+
   Latte::Mid::Start("2) Search");
-  
+
   const uint32_t key = fnv1a(tName, name_len);
 
   Latte::Mid::Start("2.1) Body");
-  
-  uint64_t base = 0; // base idx
+
+  uint64_t base = 0;
   uint64_t len  = nEntries;
-  while (len > 1) {
+  while (len > 1) { // add-half or nothing, then half/2
     const uint64_t half = len >> 1; 
     const uint32_t value = vHName(base + half - 1);
     base += half & (uint64_t)(-(int64_t)(value < key)); // 0,1 -> 0,-1 -> 0x0,0xFF.. -> base+=0, base+=half
     len -= half;
     LATTE_PULSE("2.1.1) BODY LOOP");
-  } 
-  base += (uint64_t)(vHName(base) < key);
+  } base += (uint64_t)(vHName(base) < key);
+  /* // add or substract next half to idx
+   idx = 0
+   next_half = n>>1
+   while(next_half)
+    idx+=next_half;
+    auto cmp = key - vHName(idx);
+    next_half &=0x7FFFFFFFFFFFFFFFLL; //reset sign
+    next_half = ((cmp>0)-(cmp<0) * (next_half>>1)); //sign from cmp
+  */
 
 
   Latte::Mid::Stop("2.1) Body");
 
   Latte::Mid::Start("2.2) tail");
-  for (uint64_t i = base; i < nEntries && vHName(i) == key; ++i) candidates.push_back(i);
+  for (uint64_t i = base; i < nEntries && vHName(i) == key; ++i) matches.push_back(i);
   Latte::Mid::Stop("2.2) tail");
 
   Latte::Fast::Start("2.3) Deblooming");
-  for (size_t i = 0; i < candidates.size(); ) {
-    if (std::memcmp(tName, vName(candidates[i]).data(), name_len) != 0) candidates.erase(candidates.begin()+i);
+  for (size_t i = 0; i < matches.size(); ) {
+    if (std::memcmp(tName, vName(matches[i]).data(), name_len) != 0) matches.erase(matches.begin()+i);
     else ++i;
   }
   Latte::Fast::Stop("2.3) Deblooming");
   Latte::Mid::Stop("2) Search");
-  return SearchResult(std::move(reader), std::move(candidates), tName);
+  return SearchResult(std::move(reader), std::move(matches), tName);
 }
 
 
 
+void BuildTree(
+  ROOT::RNTupleDirectAccessView<uint32_t>& vHName,
+  std::vector<uint64_t>& tree_v,
+  std::vector<uint32_t>& tree_i,
+  int64_t start, int64_t stop, size_t idx)
+{
+  if (start > stop) return;
+
+  const int64_t mid = start + (stop - start) / 2; // signed: mid-1 can't underflow past -1
+  tree_v[idx]  = vHName(static_cast<uint64_t>(mid));
+  tree_i[idx] = static_cast<uint32_t>(mid);
+
+  BuildTree(vHName, tree_v, tree_i, start, mid - 1, 2 * idx + 1);
+  BuildTree(vHName, tree_v, tree_i, mid + 1, stop, 2 * idx + 2);
+}
 
 
 
-auto OldBinarySearch(const char (&tName)[name_len]) -> SearchResult {
-  sortAndSaveRNTuple();
+auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vHName = reader->GetDirectAccessView<uint32_t>("hash_name");
   auto vName = reader->GetView<std::array<char, name_len>>("name");
-
   const uint64_t nEntries = reader->GetNEntries();
 
-  std::vector<uint64_t> candidates;
-  candidates.reserve(10);
-  
-  uint32_t key = fnv1a(tName, 5);
-  
-  Latte::Mid::Start("2) Search");
-  Latte::Mid::Start("2.1) Body");
-  uint64_t idx = 0;
-  uint64_t step = nEntries;
-  while (step > 1) {
-    step = (step + 1) >> 1;  // ceil(step/2)
-    const uint64_t probe = idx + step - 1;
-    const uint64_t cmp = (vHName(probe) < key);  // 1 if probe < key, 0 otherwise
-    idx += cmp * step;  // move forward only if probe < key
-    LATTE_PULSE("2.1.1) BODY LOOP");
-  }  
-  /*
-   idx = 0
-   next_half = n>>1
-   while(next_half)
-    idx+=next_half; //add or sub
-    auto cmp = key - vHName(idx);
-    next_half &=0x7FFFFFFFFFFFFFFFLL; //reset sign
-    next_half = ((cmp>0)-(cmp<0) * (next_half>>1)); //sign from cmp
-*/
-  Latte::Mid::Stop("2.1) Body");
+  // Perfect tree size = 2^n - 1
+  size_t perfect_size = std::bit_ceil(nEntries + 1) - 1;
+  std::vector<uint64_t> tree_v(perfect_size, UINT64_MAX);
+  std::vector<uint32_t> tree_i(perfect_size, UINT32_MAX);
 
-  Latte::Mid::Start("2.2) tail");
-  for (uint64_t i = idx; i < nEntries && vHName(i) == key; ++i) candidates.push_back(i);
-  Latte::Mid::Stop("2.2) tail");
+  BuildTree(vHName, tree_v, tree_i, 0, nEntries - 1, 0);
 
-  Latte::Fast::Start("2.3) Deblooming");
-  for (size_t i = 0; i < candidates.size(); ) {
-    if (std::memcmp(tName, vName(candidates[i]).data(), name_len) != 0) {
-      candidates.erase(candidates.begin() + i);
-    } else {
-      ++i;
+  std::vector<uint64_t> matches;
+  matches.reserve(10);
+
+  Latte::Fast::Start("2) Search");
+  uint32_t key = fnv1a(tName, name_len);
+
+  size_t idx = 0;
+  bool found = false;
+  while (idx < tree_v.size()) {
+    const uint64_t node = tree_v[idx];
+    if (node == key) {
+      found = true;
+      break;
+    }
+    if (node == UINT64_MAX) break;
+    idx = (key < node) ? (2 * idx + 1) : (2 * idx + 2);
+  }
+  Latte::Fast::Stop("2) Search");
+
+  if (found) {
+    uint64_t row = tree_i[idx];
+    uint64_t lo = row;
+    while (lo > 0 && vHName(lo - 1) == key) --lo;
+    uint64_t hi = row;
+    while (hi + 1 < nEntries && vHName(hi + 1) == key) ++hi;
+
+    for (uint64_t r = lo; r <= hi; ++r) {
+      if (std::memcmp(tName, vName(r).data(), name_len) == 0) matches.push_back(r);
     }
   }
-  Latte::Fast::Stop("2.3) Deblooming");
-  Latte::Mid::Stop("2) Search");
-  return SearchResult(std::move(reader), std::move(candidates), tName);
-}
 
+  return SearchResult(std::move(reader), std::move(matches), tName);
+}
 
 //---------------------------------------------------------------------------------------------
 
@@ -586,7 +595,7 @@ auto NoSearch(const char (&tName)[name_len]) -> SearchResult {
     DoNotOptimize(s.front()); // iterations cost 
   }
   Latte::Hard::Stop("2) Search");
-  
+
   return SearchResult(std::move(reader), std::vector<uint64_t>{}, tName);
 }
 
@@ -594,16 +603,16 @@ auto NoSearch(const char (&tName)[name_len]) -> SearchResult {
 auto NoSearchHash(const char (&tName)[name_len]) -> SearchResult {
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
-  auto vhashView = reader->GetDirectAccessView<uint32_t>("hash_name");
+  auto vHView = reader->GetDirectAccessView<uint32_t>("hash_name");
   const auto nEntries = reader->GetNEntries();
 
   Latte::Mid::Start("2) Search");
   for (uint64_t i = 0; i < nEntries; ++i) {
-    const auto& s = vhashView(i);
+    const auto& s = vHView(i);
     DoNotOptimize(s); // iterations cost 
   }
   Latte::Hard::Stop("2) Search");
-  
+
   return SearchResult(std::move(reader), std::vector<uint64_t>{}, tName);
 }
 
@@ -646,10 +655,10 @@ auto main() -> int{
   std::cout << "[" << __TIME__ << "] Iterative AVX512 + fnv1a" << std::endl;
 #elif RUN_CONSTSEARCH
   std::cout << "[" << __TIME__ << "] Iterative const size"  << std::endl;
-#elif RUN_NEWBINARYSEARCH
-  std::cout << "[" << __TIME__ << "] New Binary Search, additive only"  << std::endl;
-#elif RUN_OLDBINARYSEARCH
-  std::cout << "[" << __TIME__ << "] Old Binary Search with add/sub"  << std::endl;
+#elif RUN_BINARYSEARCH
+  std::cout << "[" << __TIME__ << "] Binary search, additive only"  << std::endl;
+#elif RUN_TREEBINARYSEARCH
+  std::cout << "[" << __TIME__ << "] Precomputed Binary Search"  << std::endl;
 #elif RUN_NOSEARCH
   std::cout << "[" << __TIME__ << "] Baseline cost of iterating over RNTuple"  << std::endl;
 #elif RUN_NOSEARCHHASH
@@ -677,10 +686,12 @@ auto main() -> int{
   Sresult = SIMD_fnv1a_Search(tName); // AVX512 with bloom fnv1a hashing
 #elif RUN_CONSTSEARCH
   Sresult = ConstSearch(tName); // constant name size
-#elif RUN_NEWBINARYSEARCH
-  Sresult = NewBinarySearch(tName); // Log2(N) search, bittrick based, additive-only
-#elif RUN_OLDBINARYSEARCH
-  Sresult = OldBinarySearch(tName); // Log2(N) search, memcmp based, add/sub
+#elif RUN_BINARYSEARCH
+  sortAndSaveRNTuple();
+  Sresult = BinarySearch(tName); // Log2(N) search, bittrick based, additive-only
+#elif RUN_TREEBINARYSEARCH
+  sortAndSaveRNTuple();
+  Sresult = TreeBinarySearch(tName); // Log2(N) search, memcmp based, add/sub
 #elif RUN_NOSEARCH
   Sresult = NoSearch(tName); // iterations cost, no search
 #elif RUN_NOSEARCHHASH
@@ -702,8 +713,8 @@ auto main() -> int{
   // float division + measured TSC rate: no more integer-truncation buckets
   // (old: (snap_Search/N*1'000'000)/4.7 quantized every run to 1e6/4.7 ns steps)
   std::cout << "[Expected] RNtuple search take "
-            << Latte::FormatTime((static_cast<double>(snap_Search)/static_cast<double>(N)*1'000'000.0)/cycles_per_ns)
-            << " per 1M iters " << '\n';
+    << Latte::FormatTime((static_cast<double>(snap_Search)/static_cast<double>(N)*1'000'000.0)/cycles_per_ns)
+    << " per 1M iters " << '\n';
   auto LargeFormat = [](double val) -> std::string {
     const char* units[] = {"", "K", "M", "B", "T"};
     int unit_idx = 0;

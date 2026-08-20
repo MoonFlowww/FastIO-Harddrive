@@ -24,7 +24,7 @@ info:
     @echo "root     : $$(root-config --version)"
     @lscpu | grep -E "Model name|^Socket|^NUMA" || true
 
-build: build-o1 build-fsl build-fnv1a build-newbin build-oldbin build-const build-nosearch build-nosearchhash
+build: build-o1 build-fsl build-fnv1a build-newbin build-treebin build-const build-nosearch build-nosearchhash
     @echo "DONE all variants built into {{bindir}}/"
     @echo ""
 
@@ -48,14 +48,14 @@ build-fnv1a:
 
 build-newbin:
     mkdir -p {{bindir}} {{data}}
-    g++ -std=c++20 {{hpc}} -DRUN_NEWBINARYSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_nbin
-    @echo "DONE {{bindir}}/{{name}}_nbin [new binary search]"
+    g++ -std=c++20 {{hpc}} -DRUN_BINARYSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_nbin
+    @echo "DONE {{bindir}}/{{name}}_nbin [binary search, additive-only]"
     @echo ""
 
-build-oldbin:
+build-treebin:
     mkdir -p {{bindir}} {{data}}
-    g++ -std=c++20 {{hpc}} -DRUN_OLDBINARYSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_obin
-    @echo "DONE {{bindir}}/{{name}}_obin [old binary search]"
+    g++ -std=c++20 {{hpc}} -DRUN_TREEBINARYSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_tbin
+    @echo "DONE {{bindir}}/{{name}}_tbin [precomputed tree binary search]"
     @echo ""
 
 build-const:
@@ -93,13 +93,13 @@ run-fnv1a: build-fnv1a
     @echo ""
 
 run-newbin: build-newbin
-    @echo "running new binary search"
+    @echo "running binary search"
     ./{{bindir}}/{{name}}_nbin
     @echo ""
 
-run-oldbin: build-oldbin
-    @echo "running old binary search"
-    ./{{bindir}}/{{name}}_obin
+run-treebin: build-treebin
+    @echo "running tree binary search"
+    ./{{bindir}}/{{name}}_tbin
     @echo ""
 
 
@@ -119,7 +119,7 @@ run-nosearchhash: build-nosearchhash
     @echo ""
 
 
-run: run-o1 run-fsl run-fnv1a run-newbin run-oldbin run-const run-nosearch run-nosearchhash
+run: run-o1 run-fsl run-fnv1a run-newbin run-treebin run-const run-nosearch run-nosearchhash
 
 clean:
     rm -rf {{bindir}} {{data}}
