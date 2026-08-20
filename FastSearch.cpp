@@ -512,7 +512,7 @@ auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
 
 void BuildTree(
   ROOT::RNTupleDirectAccessView<uint32_t>& vHName,
-  std::vector<uint64_t>& tree_v,
+  std::vector<uint32_t>& tree_v,
   std::vector<uint32_t>& tree_i,
   int64_t start, int64_t stop, size_t idx)
 {
@@ -537,7 +537,7 @@ auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
 
   // Perfect tree size = 2^n - 1
   size_t perfect_size = std::bit_ceil(nEntries + 1) - 1;
-  std::vector<uint64_t> tree_v(perfect_size, UINT64_MAX);
+  std::vector<uint32_t> tree_v(perfect_size, UINT32_MAX);
   std::vector<uint32_t> tree_i(perfect_size, UINT32_MAX);
 
   BuildTree(vHName, tree_v, tree_i, 0, nEntries - 1, 0);
@@ -551,15 +551,20 @@ auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
   size_t idx = 0;
   bool found = false;
   while (idx < tree_v.size()) {
-    const uint64_t node = tree_v[idx];
+    const uint32_t node = tree_v[idx];
     if (node == key) {
       found = true;
       break;
     }
-    if (node == UINT64_MAX) break;
-    idx = (key < node) ? (2 * idx + 1) : (2 * idx + 2);
-  }
-  Latte::Fast::Stop("2) Search");
+    idx = key < node ? (2 * idx + 1) : (2 * idx + 2); // faster than bool substraction
+  }  Latte::Fast::Stop("2) Search");
+
+  /* 37.71ns, 2.24us
+    const uint64_t node = tree_v[idx];
+    uint64_t mask = (uint64_t)-int64_t(node == key); // 0x00 or 0xFF
+    found = (idx & mask) | (found & ~mask);
+    idx = (2 * idx + (2-(key < node))); 
+  */
 
   if (found) {
     uint64_t row = tree_i[idx];

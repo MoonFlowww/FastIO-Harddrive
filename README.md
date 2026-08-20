@@ -11,11 +11,12 @@ Per 1M rows, current build (`GetDirectAccessView` + fixed-size `char[5]` names).
 | `NoSearchHash` (raw `uint32_t` iteration) | 4.70 | 278.99 ms |
 | `NoSearch` (raw `char[5]` iteration) | 9.04 | 537.12 ms |
 | --- | --- | --- |
-| `SIMD_fnv1a_Search` | 4.95 | 294.23 ms |
-| `SIMD_FSL_Search` | 10.49 | 623.01 ms |
-| `ConstSearch` | 11.21 | 666.17 ms |
-| `BinarySearch` (new, additive) | 0.343 | 20.36 ms |
-| `BinarySearch` (old, add/sub) | 0.323 | 19.17 ms |
+| `SIMD_fnv1a_Search` | 4.95ms | 294.23 ms |
+| `SIMD_FSL_Search` | 10.49ms | 623.01 ms |
+| `ConstSearch` | 11.21ms | 666.17 ms |
+| `BinarySearch` (new, additive) | 343us | 20.36 ms |
+| `BinarySearch` (old, add/sub) | 323us | 19.17 ms |
+| `TreeBinarySearch` | 9.7ns | ~530ns |
 | `O1Search` | O(1) | load: 1.12 s // O1find: 19.56 ms |
 
 Notes:
@@ -24,6 +25,7 @@ Notes:
 - `name` is a fixed-size `std::array<char,5>` in RNTuple. Search-side arrays are plain `char[name_len]`. Confirmation is a 5-byte `memcmp`.
 - AVX512 methods bloom with mask+ctz. The vectorized search does not iterate over all rows on the confirm path.
 - `BinarySearch` needs `hash_name` sorted ascending. One-time sort+rewrite cost: 7.02 s (measured this run), not counted in search time.
+- `TreeBinarySearch` needs `hash_name` sorted ascending, same as `BinarySearch`. Tree nodes store `uint32_t` (hash width) — a wider node type halves keys per cache line and doubles the tree's memory footprint.
 - `O1Search` loads a persisted `unordered_map` index. The load dominates (find = 19–20 ms).
 
 >  if we can keep umap in ram, it is the fastest, unfortunately it scale poorly ...
@@ -44,6 +46,8 @@ parsing bug on glibc >= 2.40: `sscanf "%d:%139c"` fails on short region
 names). The fixed build lives in `~/.local/opt/likwid-5.5.2` with a patched
 module at `~/.local/share/lua/likwid.lua`; perf groups are symlinked from
 `/usr/share/likwid/perfgroups`. `perf_event_paranoid` must be <= 1.
+`~/.local/bin/likwid-perfctr` is a wrapper to the fixed 5.5.2 reader, so a
+plain `likwid-perfctr -m ...` on PATH also works.
 Plain `./bin/...` runs are unaffected (markers become no-ops, Latte output
 unchanged).
 
@@ -106,6 +110,19 @@ BinarySearch (new)                         342.78 us/1M   O(log n), branchless
 
 BinarySearch (old)                         322.73 us/1M   O(log n), add/sub stepping
   same probe pattern as (new); only the index arithmetic differs (noise-level delta)
+
+TreeBinarySearch                           ~8.42 ns/1M   O(log n), precomputed tree
+  requires hash_name sorted ascending (one-time sort+rewrite: 7.02 s)
+  BuildTree: recursive, writes hash into tree_v[idx], row into tree_i[idx]
+  tree_v, tree_i: uint32_t, size = bit_ceil(N+1)-1 (perfect tree, next pow2)
+  idx=0
+  while idx < tree_v.size():
+      node = tree_v[idx]
+      if node == key: found; break
+      idx = 2*idx+1 if key < node else 2*idx+2 (faster than bool substraction)
+  tail: scan while hash_name[i] == key -> candidates
+  memcmp confirm each candidate
+  node type must match key width (uint32_t) -- wider nodes halve keys/cache-line
 
 NoSearchHash                               4.70 ms/1M
   for v in 0..N: touch(hash_name[v])        # GetDirectAccessView<uint32_t>
