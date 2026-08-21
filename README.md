@@ -140,7 +140,8 @@ O1Search                                   load 1.12 s || find 19.56 ms
 
 
 TODO:
-- consumer ID
-- gpu slice decoding
+- gpu slice decoding (low)
 - unsync multithread for lightweight max speed
-- sharding: `SHARD_MAP(hash % BIG_N) -> shard id`. `BIG_N > shard count`, so `% BIG_N` leaves room to scale. To add a shard: split one existing shard into subs, update the lookup table.
+- sharding: `SHARD_MAP(hash % BIG_N) -> shard id`. `BIG_N > shard count`, so `% BIG_N` leaves room to scale. To add a shard: split one existing shard into subs, update the lookup table. (high)
+- mixing ternary and binary search. Ternary introduce more cache load (with flat-tree sitting in a vec, we can avoid cache load only on early depths) and one additional cmp plus its corresponding logic (jmp or branchless tricks; if trick, will be expensive). Furthermore skipping 66% instead of 50% is highly interesting if x it large (either early depths).
+- For scaling, instead of rebuilding the tree-roots every new lines in DB, we can trim the last one/two level (deepest) for an AVX512 O(n) search; if DB wide enough, new rows will always land between range-bounds, making tree-update evitable. Might not be search-speed efficient, even with "sub-range prefetch" (when reaching near end of tree we can start guessing what sub portion of the rows will be loaded; when roots are removed). Then if we have an update we can simply use a offset
