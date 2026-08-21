@@ -106,20 +106,51 @@ static constexpr int name_len = 5;
 #endif
 
 
-static void RNG_String(std::mt19937& rng, char (&name)[name_len]) {
-  static constexpr std::string_view chars = "abcdefghijklmnopqrstuvwxyz";
-  std::uniform_int_distribution<std::size_t> dist(0, chars.size() - 1);
-  for (char& c : name) {
-    c = chars[dist(rng)];
-    LATTE_PULSE("0) Rng chars");
-  }
+#include <cstdint>
+#include <string_view>
+
+class XorPRNG {
+public:
+    uint64_t state;
+    explicit XorPRNG(uint64_t seed = 0x9e3779b97f4a7c15ULL) {
+        state = seed + 0x9e3779b97f4a7c15ULL;
+        uint64_t z = state;
+        z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+        state = z ^ (z >> 31);
+    }
+
+    inline uint64_t next() {
+        uint64_t x = state;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        state = x;
+        return x * 0x2545F4914F6CDD1DULL;
+    }
+
+    inline uint32_t next_bounded(uint32_t limit) {
+        // next() is 64-bit; (next()*limit)>>32 would wrap the 96-bit product in
+        // uint64_t and return garbage outside [0, limit). Use the top 32 bits of
+        // the rng instead (modulo bias here is < 2^-32, irrelevant for data gen).
+        return static_cast<uint32_t>(next() >> 32) % limit;
+    }
+};
+
+static void RNG_String(XorPRNG& rng, char (&name)[name_len]) {
+    static constexpr char chars[] = "abcdefghijklmnopqrstuvwxyz"; // 26 + NUL
+    constexpr uint32_t char_count = sizeof(chars) - 1;
+    for (char& c : name) {
+        c = chars[rng.next_bounded(char_count)];
+        LATTE_PULSE("0) Rng chars");
+    }
 }
 
-
-static auto RNG_int(std::mt19937& rng) -> int{
-  std::uniform_int_distribution<int> dist(0, 100);
-  return dist(rng);
+static auto RNG_int(XorPRNG& rng) -> int {
+    // 101 -> uniform[0, 100]
+    return static_cast<int>(rng.next_bounded(101));
 }
+
 
 static auto fnv1a(const char* str, std::size_t len) -> uint32_t { // mystical function
   uint32_t hash = 2166136261u; // Fowler-Noll-Vo hash magic number (hex: 0x811C9DC5)
@@ -192,7 +223,7 @@ void write(){ Latte::Fast::Start("1) Write");
 #if RUN_O1SEARCH
   std::unordered_map<uint32_t, std::vector<uint64_t>> index; //O(1) search if you know what will be searched
 #endif  
-  std::mt19937 rng(42);
+  XorPRNG rng;
   for(int i = 0; std::cmp_less(i,N); ++i){
     char user[name_len];
     RNG_String(rng, user);
@@ -454,7 +485,6 @@ auto ConstSearch(const char (&tName)[name_len]) -> SearchResult {
 
 
 auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
-  // NOTE: data must be hash-sorted before calling; main() runs sortAndSaveRNTuple() once.
   ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vHName = reader->GetDirectAccessView<uint32_t>("hash_name");
@@ -514,16 +544,16 @@ void BuildTree(
   ROOT::RNTupleDirectAccessView<uint32_t>& vHName,
   std::vector<uint32_t>& tree_v,
   std::vector<uint32_t>& tree_i,
-  int64_t start, int64_t stop, size_t idx)
+  int64_t start, int64_t stop, size_t idx, int_fast8_t deepstop = 0)
 {
   if (start > stop) return;
 
-  const int64_t mid = start + (stop - start) / 2; // signed: mid-1 can't underflow past -1
-  tree_v[idx]  = vHName(static_cast<uint64_t>(mid));
-  tree_i[idx] = static_cast<uint32_t>(mid);
+  const int64_t mid = start + (stop - start) / 2;
+  tree_v[idx] = vHName(static_cast<uint64_t>(mid));  //DB value
+  tree_i[idx] = static_cast<uint32_t>(mid);                       //DB idx
 
-  BuildTree(vHName, tree_v, tree_i, start, mid - 1, 2 * idx + 1);
-  BuildTree(vHName, tree_v, tree_i, mid + 1, stop, 2 * idx + 2);
+  BuildTree(vHName, tree_v, tree_i, start, mid - 1, 2 * idx + 1, deepstop);
+  BuildTree(vHName, tree_v, tree_i, mid + 1, stop, 2 * idx + 2, deepstop);
 }
 
 
