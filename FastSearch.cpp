@@ -55,49 +55,39 @@
 
 == Thermal ==
   hottest sensor                               59C
-
-== NVIDIA GPU ==
-  0, NVIDIA GeForce RTX 4070 Ti, Enabled, 2805 MHz, 285.00 W
-
-== AMD GPU ==
-  /sys/class/drm/card0/device/power_dpm_force_performance_level high
-
 */
-#include <ROOT/RFieldBase.hxx>
+
+
 #include <ROOT/RNTupleModel.hxx>
-#include <ROOT/RNTupleTypes.hxx>
 #include <ROOT/RNTupleView.hxx>
 #include <ROOT/RNTupleWriteOptions.hxx>
 #include <ROOT/RNTupleWriter.hxx>
 #include <ROOT/RNTupleReader.hxx>
-#include <TDictionary.h>
+#include <immintrin.h>
+#include <likwid-marker.h>
+#include <stdlib.h>
+#include <ROOT/RDF/RInterface.hxx>
+#include <ROOT/RNTupleRange.hxx>
 #include <array>
 #include <bit>
 #include <cstdint>
 #include <cstring>
 #include <iomanip>
 #include <memory>
-#include <mm_malloc.h>
-#include <ostream>
-#include <random>
 #include <sstream>
 #include <string_view>
-#include <sys/types.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <immintrin.h>
-#include <likwid-marker.h>
-#include <TROOT.h>
-#include <ROOT/RDataFrame.hxx>
-
-#include <ROOT/RNTupleReader.hxx>
-#include <ROOT/RNTupleWriter.hxx>
+#include <algorithm>
+#include <fstream>
+#include <iostream>
+#include <string>
 
 #include "latte.hpp"
 
 
-static constexpr uint64_t N = 26*26*26*26*26*5;
+static constexpr uint64_t N = 100'000'000;
 static constexpr int name_len = 5;
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -106,49 +96,46 @@ static constexpr int name_len = 5;
 #endif
 
 
-#include <cstdint>
-#include <string_view>
-
 class XorPRNG {
 public:
-    uint64_t state;
-    explicit XorPRNG(uint64_t seed = 0x9e3779b97f4a7c15ULL) {
-        state = seed + 0x9e3779b97f4a7c15ULL;
-        uint64_t z = state;
-        z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-        z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
-        state = z ^ (z >> 31);
-    }
+  uint64_t state;
+  explicit XorPRNG(uint64_t seed = 0x9e3779b97f4a7c15ULL) {
+    state = seed + 0x9e3779b97f4a7c15ULL;
+    uint64_t z = state;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    state = z ^ (z >> 31);
+  }
 
-    inline uint64_t next() {
-        uint64_t x = state;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        state = x;
-        return x * 0x2545F4914F6CDD1DULL;
-    }
+  inline uint64_t next() {
+    uint64_t x = state;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    state = x;
+    return x * 0x2545F4914F6CDD1DULL;
+  }
 
-    inline uint32_t next_bounded(uint32_t limit) {
-        // next() is 64-bit; (next()*limit)>>32 would wrap the 96-bit product in
-        // uint64_t and return garbage outside [0, limit). Use the top 32 bits of
-        // the rng instead (modulo bias here is < 2^-32, irrelevant for data gen).
-        return static_cast<uint32_t>(next() >> 32) % limit;
-    }
+  inline uint32_t next_bounded(uint32_t limit) {
+    // next() is 64-bit; (next()*limit)>>32 would wrap the 96-bit product in
+    // uint64_t and return garbage outside [0, limit). Use the top 32 bits of
+    // the rng instead (modulo bias here is < 2^-32, irrelevant for data gen).
+    return static_cast<uint32_t>(next() >> 32) % limit;
+  }
 };
 
 static void RNG_String(XorPRNG& rng, char (&name)[name_len]) {
-    static constexpr char chars[] = "abcdefghijklmnopqrstuvwxyz"; // 26 + NUL
-    constexpr uint32_t char_count = sizeof(chars) - 1;
-    for (char& c : name) {
-        c = chars[rng.next_bounded(char_count)];
-        LATTE_PULSE("0) Rng chars");
-    }
+  static constexpr char chars[] = "abcdefghijklmnopqrstuvwxyz"; // 26 + NUL
+  constexpr uint32_t char_count = sizeof(chars) - 1;
+  for (char& c : name) {
+    c = chars[rng.next_bounded(char_count)];
+    LATTE_PULSE("0) Rng chars");
+  }
 }
 
 static auto RNG_int(XorPRNG& rng) -> int {
-    // 101 -> uniform[0, 100]
-    return static_cast<int>(rng.next_bounded(101));
+  // 101 -> uniform[0, 100]
+  return static_cast<int>(rng.next_bounded(101));
 }
 
 
@@ -503,13 +490,12 @@ auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
   Latte::Mid::Start("2.1) Body");
 
   uint64_t base = 0;
-  uint64_t len  = nEntries;
-  while (len > 1) { // add-half or nothing, then half/2
-    const uint64_t half = len >> 1; 
+  uint64_t half = nEntries;
+  while (half > 1) { // add-half or nothing, then half/2
+    half = half >> 1; 
     const uint32_t value = vHName(base + half - 1);
     base += half & (uint64_t)(-(int64_t)(value < key)); // 0,1 -> 0,-1 -> 0x0,0xFF.. -> base+=0, base+=half
-    len -= half;
-    LATTE_PULSE("2.1.1) BODY LOOP");
+    //LATTE_PULSE("2.1.1) BODY LOOP");
   } base += (uint64_t)(vHName(base) < key);
   /* // add or substract next half to idx
    idx = 0
@@ -586,7 +572,9 @@ auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
       found = true;
       break;
     }
-    idx = key < node ? (2 * idx + 1) : (2 * idx + 2); // faster than bool substraction
+    idx = 2 * idx + (2 - (key < node));
+    //idx = key < node ? (2 * idx + 1) : (2 * idx + 2); // faster than bool substraction
+    //LATTE_PULSE("2.1.1) BODY LOOP");
   }  Latte::Fast::Stop("2) Search");
 
   /* 37.71ns, 2.24us
@@ -669,6 +657,7 @@ void read(SearchResult& Sresult){
 
   for(auto&idx:Sresult.matches){
     const auto& nm = vName(idx);
+    std::cout << "[" << idx << "]";
     std::cout << " [User]: ";
     std::cout.write(nm.data(), nm.size());
     std::cout << " [Age]: " << vAge(idx) << '\n';
@@ -739,17 +728,21 @@ auto main() -> int{
   Latte::Hard::Stop("Global");
 
 
-
-  Latte::DumpToStream(std::cout, Latte::Parameter::Time, Latte::Parameter::Raw);
+  Latte::DumpToStream(std::cout, Latte::Parameter::Time, Latte::Parameter::Calibrated);
   auto snap_Search = Latte::Snapshot("2) Search")[0];
   double cycles_per_ns;
   LATTE_FREQ(cycles_per_ns);
   std::cout << "Searching took: " << Latte::FormatTime(snap_Search/cycles_per_ns) << '\n';
-  // float division + measured TSC rate: no more integer-truncation buckets
-  // (old: (snap_Search/N*1'000'000)/4.7 quantized every run to 1e6/4.7 ns steps)
-  std::cout << "[Expected] RNtuple search take "
+  #if RUN_CONSTSEARCH || RUN_NOSEARCH || RUN_NOSEARCHHASH || RUN_SIMDFSLSEARCH || RUN_SIMDFNV1ASEARCH
+  std::cout << "[Expected] RNtuple search took "
     << Latte::FormatTime((static_cast<double>(snap_Search)/static_cast<double>(N)*1'000'000.0)/cycles_per_ns)
     << " per 1M iters " << '\n';
+  #elif RUN_TREEBINARYSEARCH || RUN_BINARYSEARCH
+  std::cout << "[Expected] RNtuple search took "
+    << Latte::FormatTime((static_cast<double>(snap_Search)/static_cast<double>(std::bit_width(N)))/cycles_per_ns)
+    << " per depth ("<< std::bit_width(N)<< ")" << '\n';
+  #endif //O1 doesnt need print
+
   auto LargeFormat = [](double val) -> std::string {
     const char* units[] = {"", "K", "M", "B", "T"};
     int unit_idx = 0;
