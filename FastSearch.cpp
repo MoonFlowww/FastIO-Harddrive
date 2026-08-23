@@ -58,6 +58,7 @@
 */
 
 
+#include <Compression.h>
 #include <ROOT/RNTupleModel.hxx>
 #include <ROOT/RNTupleView.hxx>
 #include <ROOT/RNTupleWriteOptions.hxx>
@@ -195,7 +196,7 @@ void write(){ Latte::Fast::Start("1) Write");
 
 
   ROOT::RNTupleWriteOptions opts;
-  opts.SetCompression(401); // LZ4
+  //opts.SetCompression(401);  // LZ4 (default = ZSTD 505)
   auto writer = ROOT::RNTupleWriter::Recreate(
     std::move(model), "Users", "./data/search/users.root", opts
   ); // when writer destructed, it write the footer in file
@@ -279,7 +280,7 @@ void sortAndSaveRNTuple() {
   auto fldAge = model->MakeField<int>("age");
 
   ROOT::RNTupleWriteOptions opts;
-  opts.SetCompression(401);  // LZ4
+  //opts.SetCompression(401);  // LZ4 (default = ZSTD 505)
   auto writer = ROOT::RNTupleWriter::Recreate(
     std::move(model), "Users", "./data/search/users.root", opts
   );
