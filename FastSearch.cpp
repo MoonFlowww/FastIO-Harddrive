@@ -563,7 +563,7 @@ auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
 
   Latte::Fast::Start("2) Search");
   uint32_t key = fnv1a(tName, name_len);
-
+  Latte::Fast::Start("2.1) Search Body");
   size_t idx = 0;
   bool found = false;
   while (idx < tree_v.size()) {
@@ -575,15 +575,15 @@ auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
     idx = 2 * idx + (2 - (key < node));
     //idx = key < node ? (2 * idx + 1) : (2 * idx + 2); // faster than bool substraction
     //LATTE_PULSE("2.1.1) BODY LOOP");
-  }  Latte::Fast::Stop("2) Search");
-
+  }  
+  Latte::Fast::Stop("2.1) Search Body");
   /* 37.71ns, 2.24us
     const uint64_t node = tree_v[idx];
     uint64_t mask = (uint64_t)-int64_t(node == key); // 0x00 or 0xFF
     found = (idx & mask) | (found & ~mask);
     idx = (2 * idx + (2-(key < node))); 
   */
-
+  Latte::Fast::Start("2.2) Search Tail");
   if (found) {
     uint64_t row = tree_i[idx];
     uint64_t lo = row;
@@ -595,7 +595,8 @@ auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
       if (std::memcmp(tName, vName(r).data(), name_len) == 0) matches.push_back(r);
     }
   }
-
+  Latte::Fast::Stop("2.2) Search Tail");
+  Latte::Fast::Stop("2) Search");
   return SearchResult(std::move(reader), std::move(matches), tName);
 }
 
