@@ -139,11 +139,11 @@ static auto RNG_int(XorPRNG& rng) -> int {
 }
 
 
-static auto fnv1a(const char* str, std::size_t len) -> uint32_t { // mystical function
-  uint32_t hash = 2166136261u; // Fowler-Noll-Vo hash magic number (hex: 0x811C9DC5)
+static auto fnv1a(const char* str, std::size_t len) -> uint32_t { 
+  uint32_t hash = 0x811C9DC5; // Fowler-Noll-Vo hash magic number
   for (std::size_t i = 0; i < len; ++i) {
     hash ^= static_cast<unsigned char>(str[i]);
-    hash *= 0x01000193u; //Fowler-Noll-Vo prime magic number (hex: 0x01000193)
+    hash *= 0x01000193u; //Fowler-Noll-Vo prime magic number
   }
   return hash;
 }
@@ -311,7 +311,6 @@ struct SearchResult{
 
 //---------------------------------------------------------------------------------------------
 auto SIMD_FSL_Search(const char (&tName)[name_len]) -> SearchResult{
-  ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
 
   auto vName = reader->GetView<std::array<char, name_len>>("name");
@@ -369,7 +368,6 @@ auto SIMD_FSL_Search(const char (&tName)[name_len]) -> SearchResult{
 
 //---------------------------------------------------------------------------------------------
 auto SIMD_fnv1a_Search(const char (&tName)[name_len]) -> SearchResult{
-  ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
 
   auto vName = reader->GetView<std::array<char, name_len>>("name");
@@ -444,7 +442,6 @@ auto O1Search(const char (&tName)[name_len]) -> SearchResult {
 
 //---------------------------------------------------------------------------------------------
 auto ConstSearch(const char (&tName)[name_len]) -> SearchResult {
-  ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vName = reader->GetView<std::array<char, name_len>>("name");
   const auto nEntries = reader->GetNEntries();
@@ -472,7 +469,6 @@ auto ConstSearch(const char (&tName)[name_len]) -> SearchResult {
 
 
 auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
-  ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vHName = reader->GetDirectAccessView<uint32_t>("hash_name");
   auto vName = reader->GetView<std::array<char, name_len>>("name");
@@ -545,18 +541,16 @@ void BuildTree(
 
 
 auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
-  ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vHName = reader->GetDirectAccessView<uint32_t>("hash_name");
   auto vName = reader->GetView<std::array<char, name_len>>("name");
-  const uint64_t nEntries = reader->GetNEntries();
 
   // Perfect tree size = 2^n - 1
-  size_t perfect_size = std::bit_ceil(nEntries + 1) - 1;
+  size_t perfect_size = std::bit_ceil(N + 1) - 1;
   std::vector<uint32_t> tree_v(perfect_size, UINT32_MAX);
   std::vector<uint32_t> tree_i(perfect_size, UINT32_MAX);
 
-  BuildTree(vHName, tree_v, tree_i, 0, nEntries - 1, 0);
+  BuildTree(vHName, tree_v, tree_i, 0, N - 1, 0);
 
   std::vector<uint64_t> matches;
   matches.reserve(10);
@@ -589,7 +583,11 @@ auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
     uint64_t lo = row;
     while (lo > 0 && vHName(lo - 1) == key) --lo;
     uint64_t hi = row;
-    while (hi + 1 < nEntries && vHName(hi + 1) == key) ++hi;
+    while (hi + 1 < N && vHName(hi + 1) == key) ++hi;
+
+    
+
+
 
     for (uint64_t r = lo; r <= hi; ++r) {
       if (std::memcmp(tName, vName(r).data(), name_len) == 0) matches.push_back(r);
@@ -608,7 +606,6 @@ static inline void DoNotOptimize(const T& v) {
 }
 
 auto NoSearch(const char (&tName)[name_len]) -> SearchResult {
-  ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vName = reader->GetView<std::array<char, name_len>>("name");
   const auto nEntries = reader->GetNEntries();
@@ -625,7 +622,6 @@ auto NoSearch(const char (&tName)[name_len]) -> SearchResult {
 
 
 auto NoSearchHash(const char (&tName)[name_len]) -> SearchResult {
-  ROOT::DisableImplicitMT();
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vHView = reader->GetDirectAccessView<uint32_t>("hash_name");
   const auto nEntries = reader->GetNEntries();
