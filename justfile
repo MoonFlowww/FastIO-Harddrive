@@ -7,8 +7,8 @@ bindir     := "bin"
 
 root_flags := `root-config --cflags --libs` + " -llikwid"
 
-o_base := "-O3 -march=native -mtune=native -mprefer-vector-width=512 -DLIKWID_PERFMON"
-o_math := " -ffast-math -fno-math-errno -fomit-frame-pointer"
+o_base := "-O3 -march=native -DLIKWID_PERFMON"
+o_math := " -ffast-math"
 o_loop := " -funroll-loops -fprefetch-loop-arrays -falign-functions=32 -falign-loops=32 -falign-jumps=32"
 o_code := " -fno-plt -fno-semantic-interposition -fno-stack-protector -fvect-cost-model=unlimited"
 o_link := " -flto -Wl,-O3 -Wl,--as-needed -pipe"
