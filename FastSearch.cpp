@@ -64,6 +64,8 @@
 #include <ROOT/RNTupleWriteOptions.hxx>
 #include <ROOT/RNTupleWriter.hxx>
 #include <ROOT/RNTupleReader.hxx>
+#include <cmath>
+#include <cstddef>
 #include <immintrin.h>
 #include <likwid-marker.h>
 #include <stdlib.h>
@@ -523,21 +525,22 @@ auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
 
 
 
-void BuildTree(
+void BuildBinaryTree(
   ROOT::RNTupleDirectAccessView<uint32_t>& vHName,
   std::vector<uint32_t>& tree_v,
   std::vector<uint32_t>& tree_i,
-  int64_t start, int64_t stop, size_t idx, int_fast8_t deepstop = 0)
+  int64_t start, int64_t stop, size_t idx)
 {
   if (start > stop) return;
 
   const int64_t mid = start + (stop - start) / 2;
   tree_v[idx] = vHName(static_cast<uint64_t>(mid));  //DB value
-  tree_i[idx] = static_cast<uint32_t>(mid);                       //DB idx
+  tree_i[idx] = static_cast<uint32_t>(mid); //DB idx
 
-  BuildTree(vHName, tree_v, tree_i, start, mid - 1, 2 * idx + 1, deepstop);
-  BuildTree(vHName, tree_v, tree_i, mid + 1, stop, 2 * idx + 2, deepstop);
+  BuildBinaryTree(vHName, tree_v, tree_i, start, mid-1, 2 * idx + 1); // left
+  BuildBinaryTree(vHName, tree_v, tree_i, mid+1, stop, 2 * idx + 2); //right
 }
+
 
 
 
@@ -551,7 +554,10 @@ auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
   std::vector<uint32_t> tree_v(perfect_size, UINT32_MAX);
   std::vector<uint32_t> tree_i(perfect_size, UINT32_MAX);
 
-  BuildTree(vHName, tree_v, tree_i, 0, N - 1, 0);
+  Latte::Fast::Start("BuildTree");
+  BuildBinaryTree(vHName, tree_v, tree_i, 0, N - 1, 0);
+  Latte::Fast::Stop("BuildTree");
+
 
   std::vector<uint64_t> matches;
   matches.reserve(10);
@@ -559,16 +565,18 @@ auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
   Latte::Fast::Start("2) Search");
   uint32_t key = fnv1a(tName, name_len);
   Latte::Fast::Start("2.1) Search Body");
+
   size_t idx = 0;
   bool found = false;
+
   while (idx < tree_v.size()) {
     const uint32_t node = tree_v[idx];
-    if (node == key) {
+    if (__builtin_expect(node == key, false)) { 
       found = true;
       break;
     }
-    idx = 2 * idx + (2 - (key < node));
-    //idx = key < node ? (2 * idx + 1) : (2 * idx + 2); // faster than bool substraction
+    //idx = 2*idx + (2 - (key < node));
+    idx = key < node ? (2 * idx + 1) : (2 * idx + 2); // faster than bool substraction
     //LATTE_PULSE("2.1.1) BODY LOOP");
   }  
   Latte::Fast::Stop("2.1) Search Body");
@@ -576,19 +584,16 @@ auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
     const uint64_t node = tree_v[idx];
     uint64_t mask = (uint64_t)-int64_t(node == key); // 0x00 or 0xFF
     found = (idx & mask) | (found & ~mask);
-    idx = (2 * idx + (2-(key < node))); 
+    idx = (2 * idx + (2-(key < node))); //slower than (x ? y : z)
   */
+
   Latte::Fast::Start("2.2) Search Tail");
-  if (found) {
+  if (found) { //vName is IO bottleneck
     uint64_t row = tree_i[idx];
     uint64_t lo = row;
     while (lo > 0 && vHName(lo - 1) == key) --lo;
     uint64_t hi = row;
     while (hi + 1 < N && vHName(hi + 1) == key) ++hi;
-
-    
-
-
 
     for (uint64_t r = lo; r <= hi; ++r) {
       if (std::memcmp(tName, vName(r).data(), name_len) == 0) matches.push_back(r);
@@ -598,6 +603,148 @@ auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
   Latte::Fast::Stop("2) Search");
   return SearchResult(std::move(reader), std::move(matches), tName);
 }
+
+
+void BuildTernaryTree(
+  ROOT::RNTupleDirectAccessView<uint32_t>& vHName,
+  std::vector<uint32_t>& tree_lo,
+  std::vector<uint32_t>& tree_hi,
+  std::vector<uint32_t>& tree_row,
+  std::vector<uint32_t>& tree_row_hi,
+  int64_t start, int64_t stop, size_t idx)
+{
+  if (start > stop) return;
+
+  const int64_t low = start + (stop - start) / 3;
+  const int64_t high = start + 2 * (stop - start) / 3;
+
+  // One node = one heap index. Two keys (lo, hi) split the range in 3;
+  // children live at 3*idx+{1,2,3}. Never pack the second key into idx+1:
+  // that slot belongs to the next node / the left child.
+  tree_lo[idx]      = vHName(static_cast<uint64_t>(low));  //DB value
+  tree_hi[idx]      = vHName(static_cast<uint64_t>(high)); //DB value
+  tree_row[idx]     = static_cast<uint32_t>(low);          //row of the lo key
+  tree_row_hi[idx]  = static_cast<uint32_t>(high);         //row of the hi key (hi row can be in a DIFFERENT hash-run than lo)
+
+  BuildTernaryTree(vHName, tree_lo, tree_hi, tree_row, tree_row_hi, start, low - 1, 3 * idx + 1);    //left
+  BuildTernaryTree(vHName, tree_lo, tree_hi, tree_row, tree_row_hi, low + 1, high - 1, 3 * idx + 2); //mid
+  BuildTernaryTree(vHName, tree_lo, tree_hi, tree_row, tree_row_hi, high + 1, stop, 3 * idx + 3);    //right
+}
+
+
+
+static inline auto BinaryTreeDepth(uint64_t N) -> int {
+  return std::bit_width(N)-1;
+}
+static inline auto TernaryTreeDepth(const uint64_t N) -> int {
+  if (N <= 0) return -1;
+  double val = 2.0 * (double)N - 1.0;
+  int h = static_cast<int>(std::floor(std::log(val) / std::log(3.0)));
+  // Correct potential floating-point errors
+  while (std::pow(3, h+1) <= val) ++h;
+  while (std::pow(3, h) > val) --h;
+  return h;
+}
+
+
+auto TreeTernarySearch(const char (&tName)[name_len]) -> SearchResult {
+  auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
+  auto vHName = reader->GetDirectAccessView<uint32_t>("hash_name");
+  auto vName = reader->GetView<std::array<char, name_len>>("name");
+
+  const auto nEntries = reader->GetNEntries();
+  if (nEntries == 0) return SearchResult(std::move(reader), {}, tName);
+
+  const int depth = TernaryTreeDepth(nEntries);
+  size_t cap = 1;
+  for (int i = 0; i <= depth; ++i) cap *= 3;
+  const size_t node_cap = (cap - 1) / 2;
+
+  std::vector<uint32_t> tree_lo(node_cap, 0);
+  std::vector<uint32_t> tree_hi(node_cap, 0);
+  std::vector<uint32_t> tree_row(node_cap, UINT32_MAX);    // UINT32_MAX = empty slot (rows < 2^31)
+  std::vector<uint32_t> tree_row_hi(node_cap, UINT32_MAX); // row of the hi key
+
+  Latte::Fast::Start("BuildTree");
+  BuildTernaryTree(vHName, tree_lo, tree_hi, tree_row, tree_row_hi, 0, static_cast<int64_t>(nEntries) - 1, 0);
+  Latte::Fast::Stop("BuildTree");
+
+
+  std::vector<uint64_t> matches;
+  matches.reserve(10);
+
+  Latte::Fast::Start("2) Search");
+  uint32_t key = fnv1a(tName, name_len);
+  Latte::Fast::Start("2.1) Search Body");
+  
+  size_t idx = 0;
+  bool found = false;
+  uint64_t row = 0;
+
+  while (idx < node_cap) {
+    if (tree_row[idx] == UINT32_MAX) break; // empty slot (hole / past the tree) -> not found
+    const uint32_t lo = tree_lo[idx];
+    const uint32_t hi = tree_hi[idx];
+    if (key == lo) { found = true; row = tree_row[idx]; break; }
+    if (key == hi) { found = true; row = tree_row_hi[idx]; break; }
+    // branchless descent: off = 0:left, 1:mid, 2:right -> children at 3*idx+{1,2,3}
+    idx = 3 * idx + 2 + (key > hi) - (key < lo);
+  }
+
+  /*
+  1) cmp-chain
+      key < low   ; cmpl -> left
+      key > high  ; cmph -> high
+           -> 3 * idx + (1 + (cmph - cmpl))
+
+  2) asymmetric memcmp
+      key-value -> [-x;+x]
+                  -> delta>>32-1 : left    ; sign == (-), compiler(x<0) == x>>31
+                  -> delta== 0   : middle  ; key == value
+                  -> else        : right   ; else
+
+  3) symmetric memcmp (cmp-chain with 3sub instead of 2)
+      key-value -> [-x;+x] 
+                  -> ((cmp>0)-(cmp<0)) 
+                    -> 3 * idx + 1 - r
+
+      in any case i hit (3 * idx + (1 - something))
+
+
+  1) delta
+      cmpright = key - high;
+      cmpleft = key - low;
+      off = 1 + cmpright>0 - cmpleft>0
+
+      3sub + 2cmp
+
+  2) inverse of delta, cmp first the delta
+      off = 1 + key > high - key < low
+
+      mask = uint-int(key==high | key==low) // need 2 mask: mask1= side, mask2=override/keep
+
+  */
+  Latte::Fast::Stop("2.1) Search Body");
+
+
+
+
+  Latte::Fast::Start("2.2) Search Tail");
+  if (found) { //vName is IO bottleneck
+    uint64_t lo = row;
+    while (lo > 0 && vHName(lo - 1) == key) --lo;
+    uint64_t hi = row;
+    while (hi + 1 < nEntries && vHName(hi + 1) == key) ++hi;
+
+    for (uint64_t r = lo; r <= hi; ++r) {
+      if (std::memcmp(tName, vName(r).data(), name_len) == 0) matches.push_back(r);
+    }
+  }
+  Latte::Fast::Stop("2.2) Search Tail");
+  Latte::Fast::Stop("2) Search");
+  return SearchResult(std::move(reader), std::move(matches), tName);
+}
+
 
 //---------------------------------------------------------------------------------------------
 
@@ -678,9 +825,11 @@ auto main() -> int{
 #elif RUN_CONSTSEARCH
   std::cout << "[" << __TIME__ << "] Iterative const size"  << std::endl;
 #elif RUN_BINARYSEARCH
-  std::cout << "[" << __TIME__ << "] Binary search, additive only"  << std::endl;
+  std::cout << "[" << __TIME__ << "] Binary search"  << std::endl;
 #elif RUN_TREEBINARYSEARCH
   std::cout << "[" << __TIME__ << "] Precomputed Binary Search"  << std::endl;
+#elif RUN_TREETERNARYSEARCH
+  std::cout << "[" << __TIME__ << "] Precomputed Ternary search"  << std::endl;
 #elif RUN_NOSEARCH
   std::cout << "[" << __TIME__ << "] Baseline cost of iterating over RNTuple"  << std::endl;
 #elif RUN_NOSEARCHHASH
@@ -710,10 +859,13 @@ auto main() -> int{
   Sresult = ConstSearch(tName); // constant name size
 #elif RUN_BINARYSEARCH
   sortAndSaveRNTuple();
-  Sresult = BinarySearch(tName); // Log2(N) search, bittrick based, additive-only
+  Sresult = BinarySearch(tName); // Log2(N) search, branchless
 #elif RUN_TREEBINARYSEARCH
   sortAndSaveRNTuple();
-  Sresult = TreeBinarySearch(tName); // Log2(N) search, memcmp based, add/sub
+  Sresult = TreeBinarySearch(tName); // Log2(N) search, memcmp style, add/sub
+#elif RUN_TREETERNARYSEARCH
+  sortAndSaveRNTuple();
+  Sresult = TreeTernarySearch(tName); // log3(N) search, branchless + fast-pass
 #elif RUN_NOSEARCH
   Sresult = NoSearch(tName); // iterations cost, no search
 #elif RUN_NOSEARCHHASH
@@ -731,15 +883,15 @@ auto main() -> int{
   double cycles_per_ns;
   LATTE_FREQ(cycles_per_ns);
   std::cout << "Searching took: " << Latte::FormatTime(snap_Search/cycles_per_ns) << '\n';
-  #if RUN_CONSTSEARCH || RUN_NOSEARCH || RUN_NOSEARCHHASH || RUN_SIMDFSLSEARCH || RUN_SIMDFNV1ASEARCH
+#if RUN_CONSTSEARCH || RUN_NOSEARCH || RUN_NOSEARCHHASH || RUN_SIMDFSLSEARCH || RUN_SIMDFNV1ASEARCH
   std::cout << "[Expected] RNtuple search took "
     << Latte::FormatTime((static_cast<double>(snap_Search)/static_cast<double>(N)*1'000'000.0)/cycles_per_ns)
     << " per 1M iters " << '\n';
-  #elif RUN_TREEBINARYSEARCH || RUN_BINARYSEARCH
+#elif RUN_TREEBINARYSEARCH || RUN_BINARYSEARCH
   std::cout << "[Expected] RNtuple search took "
     << Latte::FormatTime((static_cast<double>(snap_Search)/static_cast<double>(std::bit_width(N)))/cycles_per_ns)
     << " per depth ("<< std::bit_width(N)<< ")" << '\n';
-  #endif //O1 doesnt need print
+#endif //O1 doesnt need print
 
   auto LargeFormat = [](double val) -> std::string {
     const char* units[] = {"", "K", "M", "B", "T"};

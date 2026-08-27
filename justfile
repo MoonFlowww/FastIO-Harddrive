@@ -24,7 +24,7 @@ info:
     @echo "root     : $$(root-config --version)"
     @lscpu | grep -E "Model name|^Socket|^NUMA" || true
 
-build: build-o1 build-fsl build-fnv1a build-bin build-treebin build-const build-nosearch build-nosearchhash
+build: build-o1 build-fsl build-fnv1a build-bin build-treeter build-treebin build-const build-nosearch build-nosearchhash
     @echo "DONE all variants built into {{bindir}}/"
     @echo ""
 
@@ -49,8 +49,15 @@ build-fnv1a:
 build-bin:
     mkdir -p {{bindir}} {{data}}
     g++ -std=c++20 {{hpc}} -DRUN_BINARYSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_bin
-    @echo "DONE {{bindir}}/{{name}}_bin [binary search, additive-only]"
+    @echo "DONE {{bindir}}/{{name}}_bin [binary search]"
     @echo ""
+
+build-treeter:
+    mkdir -p {{bindir}} {{data}}
+    g++ -std=c++20 {{hpc}} -DRUN_TREETERNARYSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_ter
+    @echo "DONE {{bindir}}/{{name}}_treeter [tree ternary search]"
+    @echo ""
+
 
 build-treebin:
     mkdir -p {{bindir}} {{data}}
@@ -87,19 +94,25 @@ run-fsl: build-fsl
     ./{{bindir}}/{{name}}_fsl
     @echo ""
 
+
 run-fnv1a: build-fnv1a
     @echo "running AVX512 + fnv1a search"
     ./{{bindir}}/{{name}}_fnv1a
     @echo ""
-
 run-bin: build-bin
     @echo "running binary search"
     ./{{bindir}}/{{name}}_bin
     @echo ""
 
+
+
 run-treebin: build-treebin
     @echo "running tree binary search"
     ./{{bindir}}/{{name}}_treebin
+    @echo ""
+run-treeter: build-treeter
+    @echo "running tree ternary search"
+    ./{{bindir}}/{{name}}_ter
     @echo ""
 
 
@@ -119,7 +132,7 @@ run-nosearchhash: build-nosearchhash
     @echo ""
 
 
-run: run-o1 run-fsl run-fnv1a run-bin run-treebin run-const run-nosearch run-nosearchhash
+run: run-o1 run-fsl run-fnv1a run-bin run-treeter run-treebin run-const run-nosearch run-nosearchhash
 
 clean:
     rm -rf {{bindir}} {{data}}
