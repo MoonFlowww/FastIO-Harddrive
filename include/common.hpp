@@ -39,7 +39,8 @@ struct SearchResult {
   SearchResult() = default;
 };
 
-inline auto fnv1a(const char* str, std::size_t len) -> uint32_t {
+
+inline auto fnv1a(const char* str, std::size_t len) noexcept -> uint32_t {
   uint32_t hash = 0x811C9DC5;  // FNV offset basis
   for (std::size_t i = 0; i < len; ++i) {
     hash ^= static_cast<unsigned char>(str[i]);
@@ -48,9 +49,25 @@ inline auto fnv1a(const char* str, std::size_t len) -> uint32_t {
   return hash;
 }
 
-static inline auto BinaryTreeDepth(uint64_t N) -> int {
+
+consteval auto BinaryTreeDepth(uint64_t N) -> int {
   return std::bit_width(N) - 1;
 }
+
+
+consteval auto TernaryTreeDepth(const uint64_t n) -> int {
+  if (n == 0) return -1;
+  uint64_t val = 2 * n - 1;
+  uint64_t cap = 1;
+  int h = 0;
+  while (cap * 3 <= val) {
+    cap *= 3;
+    ++h;
+  }
+  return h;
+}
+
+
 
 void sortAndSaveRNTuple() {
   Latte::Fast::Start("Sort RNTuple");
@@ -106,6 +123,7 @@ void sortAndSaveRNTuple() {
   Latte::Fast::Stop("Writing sorted data");
   Latte::Fast::Stop("Sort RNTuple");
 }
+
 
 static auto loadIndex(const std::string& path)
     -> std::unordered_map<uint32_t, std::vector<uint64_t>> {

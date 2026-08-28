@@ -17,6 +17,7 @@ static inline void DoNotOptimize(const T& v) {
   asm volatile("" : : "r,m"(v) : "memory");
 }
 
+
 auto NoSearch(const char (&tName)[name_len]) -> SearchResult {
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vName = reader->GetView<std::array<char, name_len>>("name");
@@ -31,6 +32,7 @@ auto NoSearch(const char (&tName)[name_len]) -> SearchResult {
 
   return SearchResult(std::move(reader), std::vector<uint64_t>{}, tName);
 }
+
 
 auto NoSearchHash(const char (&tName)[name_len]) -> SearchResult {
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");

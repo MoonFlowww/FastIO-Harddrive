@@ -1,11 +1,23 @@
 #pragma once
 
+#include <stdint.h>
+
+#include <ROOT/RNTupleReader.hxx>
+#include <ROOT/RNTupleView.hxx>
+#include <array>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #include "../latte.hpp"
 #include "common.hpp"
 
 auto O1Search(const char (&tName)[name_len]) -> SearchResult {
   Latte::Fast::Start("LoadIndex");
-  auto index = loadIndex("./data/search/users.idx");
+  const auto index = loadIndex("./data/search/users.idx");
   Latte::Fast::Stop("LoadIndex");
 
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
@@ -15,7 +27,7 @@ auto O1Search(const char (&tName)[name_len]) -> SearchResult {
   uint32_t key = fnv1a(tName, name_len);
   Latte::Fast::Start("2.2) Search find");
   std::vector<uint64_t> matches;
-  auto it = index.find(key);
+  const auto it = index.find(key);
   if (it != index.end()) {
     for (uint64_t row : it->second) {
       if (std::memcmp(tName, vName(row).data(), name_len) == 0)

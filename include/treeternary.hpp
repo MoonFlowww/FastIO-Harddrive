@@ -33,23 +33,13 @@ inline void BuildTernaryTree(ROOT::RNTupleDirectAccessView<uint32_t>& vHName,
   BuildTernaryTree(vHName, tree_v, tree_i, high + 1, stop, 3 * node_idx + 3);
 }
 
-static constexpr auto TernaryTreeDepth(const uint64_t n) -> int {
-  if (n == 0) return -1;
-  uint64_t val = 2 * n - 1;
-  uint64_t cap = 1;
-  int h = 0;
-  while (cap * 3 <= val) {
-    cap *= 3;
-    ++h;
-  }
-  return h;
-}
 
 static constexpr auto Pow3(const int e) -> uint64_t {
   uint64_t p = 1;
   for (int i = 0; i < e; ++i) p *= 3;
   return p;
 }
+
 
 inline auto TreeTernarySearch(const char (&tName)[name_len]) -> SearchResult {
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");

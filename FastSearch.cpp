@@ -54,6 +54,7 @@
   hottest sensor                               59C
 */
 
+#include <Rtypes.h>
 #include <likwid-marker.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,9 +66,11 @@
 #include <ROOT/RNTupleWriter.hxx>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -79,13 +82,17 @@
 #include <vector>
 
 #include "dependencies/event_counter.h"
+#include "include/baseline.hpp"
+#include "include/binary.hpp"
 #include "include/common.hpp"
+#include "include/const.hpp"
+#include "include/fnv1a.hpp"
+#include "include/fsl.hpp"
+#include "include/o1.hpp"
+#include "include/treebinary.hpp"
+#include "include/treeternary.hpp"
 #include "latte.hpp"
 
-#if defined(__GNUC__) || defined(__clang__)
-  #define LIKELY(x) __builtin_expect(!!(x), 1)
-  #define UNLIKELY(x) __builtin_expect(!!(x), 0)
-#endif
 counters::event_collector collector;
 
 class XorPRNG {
@@ -113,6 +120,7 @@ class XorPRNG {
   }
 };
 
+
 static void RNG_String(XorPRNG& rng, char (&name)[name_len]) {
   static constexpr char chars[] = "abcdefghijklmnopqrstuvwxyz";  // 26 + NUL
   constexpr uint32_t char_count = sizeof(chars) - 1;
@@ -122,10 +130,12 @@ static void RNG_String(XorPRNG& rng, char (&name)[name_len]) {
   }
 }
 
+
 static auto RNG_int(XorPRNG& rng) -> int {
   // 101 -> uniform[0, 100]
   return static_cast<int>(rng.next_bounded(101));
 }
+
 
 static void saveIndex(
     const std::unordered_map<uint32_t, std::vector<uint64_t>>& index,
@@ -143,6 +153,7 @@ static void saveIndex(
             rowCount * sizeof(uint64_t));
   }
 }
+
 
 void write() {
   Latte::Fast::Start("1) Write");
@@ -193,6 +204,7 @@ void write() {
   Latte::Fast::Stop("1) Write");
 }
 
+
 void read(SearchResult& Sresult) {
   Latte::Mid::Start("3) Read");
   Latte::Fast::Start("3.1) Read Init");
@@ -215,160 +227,185 @@ void read(SearchResult& Sresult) {
   Latte::Hard::Stop("3) Read");
 }
 
-template <class function_type>
+
+template <class Fn>
 std::pair<counters::event_aggregate, size_t> bench(
-    const function_type&& function,
+    Fn&& fn,
     size_t min_repeat = 10,
     size_t min_time_ns = 40'000'000,
     size_t max_repeat = 10'000'000) {
-  size_t N = min_repeat ? min_repeat : 1;
+  size_t n = min_repeat ? min_repeat : 1;
   counters::event_aggregate warm_aggregate{};
 
-  for (size_t i = 0; i < N; ++i) {
+  for (size_t i = 0; i < n; ++i) {
     std::atomic_thread_fence(std::memory_order_acquire);
     collector.start();
-    function();
+    std::invoke(fn);
     std::atomic_thread_fence(std::memory_order_release);
 
     warm_aggregate << collector.end();
-    if ((i + 1 == N) && (warm_aggregate.total_elapsed_ns() < min_time_ns) &&
-        (N < max_repeat)) {
-      N *= 10;
+    if ((i + 1 == n) && (warm_aggregate.total_elapsed_ns() < min_time_ns) &&
+        (n < max_repeat)) {
+      n *= 10;
     }
   }
+
   counters::event_aggregate aggregate{};
   for (size_t i = 0; i < 10; ++i) {
     std::atomic_thread_fence(std::memory_order_acquire);
     collector.start();
-    for (size_t j = 0; j < N; ++j) {
-      function();
+    for (size_t j = 0; j < n; ++j) {
+      std::invoke(fn);
     }
     std::atomic_thread_fence(std::memory_order_release);
 
     aggregate << collector.end();
   }
-  return {aggregate, N};
+  return {aggregate, n};
 }
 
-double pretty_print_array(const std::string& name,
-                          size_t num_chars,
-                          size_t num_elements,
-                          std::pair<counters::event_aggregate, size_t> result) {
-  const auto& agg = result.first;
-  size_t N = result.second;
-  num_chars *= N;
-  num_elements *= N;
-  printf("    %-28s : %8.2f ns/value %8.2f GB/s",
-         name.c_str(),
-         agg.elapsed_ns() / num_elements,
-         num_chars / agg.elapsed_ns());
-  if (collector.has_events()) {
-    printf(" %8.2f GHz %8.2f cycles/value %8.2f ins./value %8.2f i/c",
-           agg.cycles() / agg.elapsed_ns(),
-           agg.cycles() / num_elements,
-           agg.instructions() / num_elements,
-           agg.instructions() / agg.cycles());
-  }
-  printf("\n");
-  return num_chars / agg.elapsed_ns();
+
+static void format_compact(double v, char* buf) {
+  if (v >= 1e9)
+    snprintf(buf, 16, "%.2f G", v / 1e9);
+  else if (v >= 1e6)
+    snprintf(buf, 16, "%.2f M", v / 1e6);
+  else if (v >= 1e3)
+    snprintf(buf, 16, "%.2f K", v / 1e3);
+  else
+    snprintf(buf, 16, "%.2f", v);
 }
+
+
+void pretty_print_search(
+    const char* name,
+    const std::pair<counters::event_aggregate, size_t>& result,
+    double norm_divisor = 1.0,
+    const char* norm_unit = "search") {
+  const auto& agg = result.first;
+  const size_t reps = result.second;
+  printf("    %-28s : %10s/search  (%zu iters x %d rounds, fastest %s)\n",
+         name,
+         Latte::FormatTime(agg.elapsed_ns()).c_str(),
+         reps,
+         agg.iteration_count(),
+         Latte::FormatTime(agg.fastest_elapsed_ns()).c_str());
+  if (collector.has_events() && agg.cycles() > 0.0) {
+    const double ipc = agg.instructions() / agg.cycles();
+    char cyc_buf[16];
+    char ins_buf[16];
+    format_compact(agg.cycles() / norm_divisor, cyc_buf);
+    format_compact(agg.instructions() / norm_divisor, ins_buf);
+    printf("        cycles %7s/%s  ins %7s/%s  i/c %5.2f",
+           cyc_buf,
+           norm_unit,
+           ins_buf,
+           norm_unit,
+           ipc);
+    if (agg.branches() > 0.0)
+      printf("  br-miss %5.2f%%", 100.0 * agg.branch_misses() / agg.branches());
+    printf("  cache-miss/1k-ins %5.2f\n",
+           1000.0 * agg.cache_misses() / agg.instructions());
+  }
+}
+
 
 auto main() -> int {
   LIKWID_MARKER_INIT;
   LIKWID_MARKER_REGISTER("1_Write");
   LIKWID_MARKER_REGISTER("2_Search");
+
+  const char* variant = "";
+  SearchResult (*search_fn)(const char (&)[name_len]) = nullptr;
+  double norm_divisor = 1.0;
+  const char* norm_unit = "search";
+
 #if RUN_O1SEARCH
-  std::cout << "[" << __TIME__ << "] Use O(1) via unordered_map" << std::endl;
+  variant = "Use O(1) via unordered_map";
+  search_fn = O1Search;
 #elif RUN_SIMDFSLSEARCH
-  std::cout << "[" << __TIME__ << "] Iterative AVX512 + FSL" << std::endl;
+  variant = "Iterative AVX512 + FSL";
+  search_fn = SIMD_FSL_Search;
 #elif RUN_SIMDFNV1ASEARCH
-  std::cout << "[" << __TIME__ << "] Iterative AVX512 + fnv1a" << std::endl;
+  variant = "Iterative AVX512 + fnv1a";
+  search_fn = SIMD_fnv1a_Search;
 #elif RUN_CONSTSEARCH
-  std::cout << "[" << __TIME__ << "] Iterative const size" << std::endl;
+  variant = "Iterative const size";
+  search_fn = ConstSearch;
 #elif RUN_BINARYSEARCH
-  std::cout << "[" << __TIME__ << "] Binary search" << std::endl;
+  variant = "Binary search";
+  search_fn = BinarySearch;
 #elif RUN_TREEBINARYSEARCH
-  std::cout << "[" << __TIME__ << "] Precomputed Binary Search" << std::endl;
+  variant = "Precomputed Binary Search";
+  search_fn = TreeBinarySearch;
 #elif RUN_TREETERNARYSEARCH
-  std::cout << "[" << __TIME__ << "] Precomputed Ternary search" << std::endl;
+  variant = "Precomputed Ternary search";
+  search_fn = TreeTernarySearch;
 #elif RUN_NOSEARCH
-  std::cout << "[" << __TIME__ << "] Baseline cost of iterating over RNTuple"
-            << std::endl;
+  variant = "Baseline cost of iterating over RNTuple";
+  search_fn = NoSearch;
 #elif RUN_NOSEARCHHASH
-  std::cout << "[" << __TIME__
-            << "] Baseline cost of iterating over RNTuple with hash"
-            << std::endl;
+  variant = "Baseline cost of iterating over RNTuple with hash";
+  search_fn = NoSearchHash;
 #else
   std::cout << "No Parameter search function given, Abort()" << '\n';
   abort();
 #endif
 
+#if RUN_CONSTSEARCH || RUN_NOSEARCH || RUN_NOSEARCHHASH || \
+    RUN_SIMDFSLSEARCH || RUN_SIMDFNV1ASEARCH
+  norm_divisor = static_cast<double>(N) / 1'000'000.0;
+  norm_unit = "1M rows";
+#elif RUN_TREEBINARYSEARCH || RUN_BINARYSEARCH
+  norm_divisor = static_cast<double>(std::bit_width(N));
+  norm_unit = "depth";
+#elif RUN_TREETERNARYSEARCH
+  norm_divisor = static_cast<double>(TernaryTreeDepth(N));
+  norm_unit = "depth";
+#endif
+
+  std::cout << "[" << __TIME__ << "] " << variant << std::endl;
+
   char tName[name_len] = {'a', 'l', 'i', 'c', 'e'};
   Latte::Mid::Start("Global");
+
+  double write_ns = 0.0;
+  auto t0 = std::chrono::steady_clock::now();
   LIKWID_MARKER_START("1_Write");
   write();
   LIKWID_MARKER_STOP("1_Write");
+  auto t1 = std::chrono::steady_clock::now();
+  write_ns = std::chrono::duration<double, std::nano>(t1 - t0).count();
 
-  SearchResult Sresult;
-  LIKWID_MARKER_START("2_Search");
-#if RUN_O1SEARCH
-  Sresult = O1Search(tName);  // academically fast O(1)
-#elif RUN_SIMDFSLSEARCH
-  Sresult =
-      SIMD_FSL_Search(tName);  // AVX512 with bloom first+second+last name char
-#elif RUN_SIMDFNV1ASEARCH
-  Sresult = SIMD_fnv1a_Search(tName);  // AVX512 with bloom fnv1a hashing
-#elif RUN_CONSTSEARCH
-  Sresult = ConstSearch(tName);  // constant name size
-#elif RUN_BINARYSEARCH
+#if RUN_BINARYSEARCH || RUN_TREEBINARYSEARCH || RUN_TREETERNARYSEARCH
+  double sort_ns = 0.0;
+  t0 = std::chrono::steady_clock::now();
   sortAndSaveRNTuple();
-  Sresult = BinarySearch(tName);  // Log2(N) search, branchless
-#elif RUN_TREEBINARYSEARCH
-  sortAndSaveRNTuple();
-  Sresult = TreeBinarySearch(tName);  // Log2(N) search, memcmp style, add/sub
-#elif RUN_TREETERNARYSEARCH
-  sortAndSaveRNTuple();
-  Sresult = TreeTernarySearch(tName);  // log3(N) search, branchless + fast-pass
-#elif RUN_NOSEARCH
-  Sresult = NoSearch(tName);  // iterations cost, no search
-#elif RUN_NOSEARCHHASH
-  Sresult = NoSearchHash(
-      tName);  // iterations cost with fixed size uint32_t, no search
+  t1 = std::chrono::steady_clock::now();
+  sort_ns = std::chrono::duration<double, std::nano>(t1 - t0).count();
 #endif
+
+  LIKWID_MARKER_START("2_Search");
+  auto result =
+      bench([&] { return search_fn(tName); }, 1, 40'000'000, 10'000'000);
   LIKWID_MARKER_STOP("2_Search");
 
+  SearchResult Sresult = search_fn(tName);
   read(Sresult);
   Latte::Hard::Stop("Global");
 
   Latte::DumpToStream(
       std::cout, Latte::Parameter::Time, Latte::Parameter::Calibrated);
-  auto snap_Search = Latte::Snapshot("2) Search")[0];
-  double cycles_per_ns;
-  LATTE_FREQ(cycles_per_ns);
-  std::cout << "Searching took: "
-            << Latte::FormatTime(snap_Search / cycles_per_ns) << '\n';
-#if RUN_CONSTSEARCH || RUN_NOSEARCH || RUN_NOSEARCHHASH || \
-    RUN_SIMDFSLSEARCH || RUN_SIMDFNV1ASEARCH
-  std::cout << "[Expected] RNtuple search took "
-            << Latte::FormatTime((static_cast<double>(snap_Search) /
-                                  static_cast<double>(N) * 1'000'000.0) /
-                                 cycles_per_ns)
-            << " per 1M iters " << '\n';
-#elif RUN_TREEBINARYSEARCH || RUN_BINARYSEARCH
-  std::cout << "[Expected] RNtuple search took "
-            << Latte::FormatTime((static_cast<double>(snap_Search) /
-                                  static_cast<double>(std::bit_width(N))) /
-                                 cycles_per_ns)
-            << " per depth (" << std::bit_width(N) << ")" << '\n';
 
-#elif RUN_TREETERNARYSEARCH
-  std::cout << "[Expected] RNtuple search took "
-            << Latte::FormatTime((static_cast<double>(snap_Search) /
-                                  static_cast<double>(std::bit_width(N))) /
-                                 cycles_per_ns)
-            << " per depth (" << TernaryTreeDepth(N) << ")" << '\n';
-
-#endif  //O1 doesnt need print
+  printf("Write        : %s\n", Latte::FormatTime(write_ns).c_str());
+#if RUN_BINARYSEARCH || RUN_TREEBINARYSEARCH || RUN_TREETERNARYSEARCH
+  printf("Sort         : %s\n", Latte::FormatTime(sort_ns).c_str());
+#endif
+  printf("Search       :\n");
+  pretty_print_search(variant, result, norm_divisor, norm_unit);
+  printf("    [Expected] %s / %s\n",
+         Latte::FormatTime(result.first.elapsed_ns() / norm_divisor).c_str(),
+         norm_unit);
 
   auto LargeFormat = [](double val) -> std::string {
     const char* units[] = {"", "K", "M", "B", "T"};

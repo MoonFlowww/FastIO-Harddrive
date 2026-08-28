@@ -17,8 +17,8 @@
 auto SIMD_fnv1a_Search(const char (&tName)[name_len]) -> SearchResult {
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
 
-  auto       vName    = reader->GetView<std::array<char, name_len>>("name");
-  auto       vHView   = reader->GetDirectAccessView<uint32_t>("hash_name");
+  auto vName = reader->GetView<std::array<char, name_len>>("name");
+  auto vHView = reader->GetDirectAccessView<uint32_t>("hash_name");
   const auto nEntries = reader->GetNEntries();
   std::vector<uint64_t> matches;
   matches.reserve(10);
@@ -32,7 +32,7 @@ auto SIMD_fnv1a_Search(const char (&tName)[name_len]) -> SearchResult {
   for (; v + 16 <= nEntries; v += 16) {
     for (uint32_t j = 0; j < 16; ++j) {  // loading v64
       const auto& h = vHView(v + j);
-      hashed[j]     = static_cast<uint32_t>(h);
+      hashed[j] = static_cast<uint32_t>(h);
     }
     __m512i vcan_hashed = _mm512_load_si512(hashed);  // last step of loading
 

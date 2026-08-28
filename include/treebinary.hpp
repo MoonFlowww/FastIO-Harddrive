@@ -30,6 +30,7 @@ void BuildBinaryTree(ROOT::RNTupleDirectAccessView<uint32_t>& vHName,
   BuildBinaryTree(vHName, tree_v, tree_i, mid + 1, stop, 2 * idx + 2);  // right
 }
 
+
 auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
   auto vHName = reader->GetDirectAccessView<uint32_t>("hash_name");
