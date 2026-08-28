@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+
 #include <ROOT/RNTupleReader.hxx>
 #include <ROOT/RNTupleView.hxx>
 #include <array>
@@ -9,8 +10,8 @@
 #include <utility>
 #include <vector>
 
-#include "common.hpp"
 #include "../latte.hpp"
+#include "common.hpp"
 
 auto ConstSearch(const char (&tName)[name_len]) -> SearchResult {
   auto reader = ROOT::RNTupleReader::Open("Users", "./data/search/users.root");
@@ -33,5 +34,3 @@ auto ConstSearch(const char (&tName)[name_len]) -> SearchResult {
   Latte::Hard::Stop("2) Search");
   return SearchResult(std::move(reader), std::move(matches), tName);
 }
-
-

@@ -1,8 +1,7 @@
 #pragma once
 
-#include "common.hpp"
 #include "../latte.hpp"
-
+#include "common.hpp"
 
 auto O1Search(const char (&tName)[name_len]) -> SearchResult {
   Latte::Fast::Start("LoadIndex");
@@ -19,7 +18,8 @@ auto O1Search(const char (&tName)[name_len]) -> SearchResult {
   auto it = index.find(key);
   if (it != index.end()) {
     for (uint64_t row : it->second) {
-      if (std::memcmp(tName, vName(row).data(), name_len) == 0) matches.push_back(row);
+      if (std::memcmp(tName, vName(row).data(), name_len) == 0)
+        matches.push_back(row);
     }
   }
   Latte::Fast::Stop("2.2) Search find");
@@ -27,5 +27,3 @@ auto O1Search(const char (&tName)[name_len]) -> SearchResult {
 
   return SearchResult(std::move(reader), std::move(matches), tName);
 }
-
-

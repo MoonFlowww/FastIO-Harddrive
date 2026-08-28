@@ -11,10 +11,7 @@
 //PS: AVX512-based use mask+ctz, vectorized search doesnt iterate over all of rows
 //Reason why fnv1a is faster than iterations w/out logic
 
-
-
 // best optimization is compression at 401
-
 
 /*
 == CPU ==
@@ -57,43 +54,42 @@
   hottest sensor                               59C
 */
 
+#include <likwid-marker.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-#include <Compression.h>
 #include <ROOT/RNTupleModel.hxx>
+#include <ROOT/RNTupleReader.hxx>
 #include <ROOT/RNTupleView.hxx>
 #include <ROOT/RNTupleWriteOptions.hxx>
 #include <ROOT/RNTupleWriter.hxx>
-#include <ROOT/RNTupleReader.hxx>
-#include <immintrin.h>
-#include <likwid-marker.h>
-#include <stdlib.h>
-#include <ROOT/RDF/RInterface.hxx>
-#include <ROOT/RNTupleRange.hxx>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <memory>
 #include <sstream>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <fstream>
-#include <iostream>
-#include <string>
 
+#include "dependencies/event_counter.h"
+#include "include/common.hpp"
 #include "latte.hpp"
-#include "include/treeternary.hpp"
 
 #if defined(__GNUC__) || defined(__clang__)
-#define LIKELY(x)      __builtin_expect(!!(x), 1)
-#define UNLIKELY(x)    __builtin_expect(!!(x), 0) 
+  #define LIKELY(x) __builtin_expect(!!(x), 1)
+  #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 #endif
-
+counters::event_collector collector;
 
 class XorPRNG {
-public:
+ public:
   uint64_t state;
   explicit XorPRNG(uint64_t seed = 0x9e3779b97f4a7c15ULL) {
     state = seed + 0x9e3779b97f4a7c15ULL;
@@ -113,15 +109,12 @@ public:
   }
 
   inline uint32_t next_bounded(uint32_t limit) {
-    // next() is 64-bit; (next()*limit)>>32 would wrap the 96-bit product in
-    // uint64_t and return garbage outside [0, limit). Use the top 32 bits of
-    // the rng instead (modulo bias here is < 2^-32, irrelevant for data gen).
     return static_cast<uint32_t>(next() >> 32) % limit;
   }
 };
 
 static void RNG_String(XorPRNG& rng, char (&name)[name_len]) {
-  static constexpr char chars[] = "abcdefghijklmnopqrstuvwxyz"; // 26 + NUL
+  static constexpr char chars[] = "abcdefghijklmnopqrstuvwxyz";  // 26 + NUL
   constexpr uint32_t char_count = sizeof(chars) - 1;
   for (char& c : name) {
     c = chars[rng.next_bounded(char_count)];
@@ -134,8 +127,9 @@ static auto RNG_int(XorPRNG& rng) -> int {
   return static_cast<int>(rng.next_bounded(101));
 }
 
-
-static void saveIndex(const std::unordered_map<uint32_t, std::vector<uint64_t>>& index, const std::string& path) {
+static void saveIndex(
+    const std::unordered_map<uint32_t, std::vector<uint64_t>>& index,
+    const std::string& path) {
   std::ofstream f(path, std::ios::binary);
 
   uint64_t mapSize = index.size();
@@ -145,12 +139,13 @@ static void saveIndex(const std::unordered_map<uint32_t, std::vector<uint64_t>>&
     f.write(reinterpret_cast<const char*>(&hash), sizeof(hash));
     uint64_t rowCount = rows.size();
     f.write(reinterpret_cast<const char*>(&rowCount), sizeof(rowCount));
-    f.write(reinterpret_cast<const char*>(rows.data()), rowCount * sizeof(uint64_t));
+    f.write(reinterpret_cast<const char*>(rows.data()),
+            rowCount * sizeof(uint64_t));
   }
 }
 
-
-void write(){ Latte::Fast::Start("1) Write");
+void write() {
+  Latte::Fast::Start("1) Write");
   Latte::Fast::Start("1.1) Write init");
   auto model = ROOT::RNTupleModel::Create();
   // RNTuple fixed-size array column; a raw char[5] would be normalized to std::array<char,5> anyway.
@@ -158,32 +153,33 @@ void write(){ Latte::Fast::Start("1) Write");
   auto hash_name = model->MakeField<uint32_t>("hash_name");
   auto age = model->MakeField<int>("age");
 
-
   ROOT::RNTupleWriteOptions opts;
   //opts.SetCompression(401);  // LZ4 (default = ZSTD 505)
   auto writer = ROOT::RNTupleWriter::Recreate(
-    std::move(model), "Users", "./data/search/users.root", opts
-  ); // when writer destructed, it write the footer in file
+      std::move(model),
+      "Users",
+      "./data/search/users.root",
+      opts);  // when writer destructed, it write the footer in file
   //1) Fill() × 50k        ->  fills in-memory column buffers (pages)
   //1.2) page full (~64KB)   ->  page gets compressed (Optional, LZ4 here)
   //3) cluster threshold   ->  all column pages flushed to disk as one cluster (~50MB default)
   //4) destructor          ->  final cluster + footer (schema, cluster index) written
 
-
   Latte::Fast::Stop("1.1) Write init");
 
 #if RUN_O1SEARCH
-  std::unordered_map<uint32_t, std::vector<uint64_t>> index; //O(1) search if you know what will be searched
-#endif  
+  std::unordered_map<uint32_t, std::vector<uint64_t>>
+      index;  //O(1) search if you know what will be searched
+#endif
   XorPRNG rng;
-  for(int i = 0; std::cmp_less(i,N); ++i){
+  for (int i = 0; std::cmp_less(i, N); ++i) {
     char user[name_len];
     RNG_String(rng, user);
     uint32_t huser = fnv1a(user, name_len);
     std::memcpy(name->data(), user, name_len);
     *hash_name = huser;
     *age = RNG_int(rng);
-    writer->Fill(); // Sit in ram, pushed by cluster
+    writer->Fill();  // Sit in ram, pushed by cluster
 #if RUN_O1SEARCH
     index[huser].push_back(i);
 #endif
@@ -193,24 +189,22 @@ void write(){ Latte::Fast::Start("1) Write");
   Latte::Fast::Start("1.3) Write SaveIndex");
   saveIndex(index, "./data/search/users.idx");
   Latte::Fast::Stop("1.3) Write SaveIndex");
-#endif  
+#endif
   Latte::Fast::Stop("1) Write");
 }
 
-
-void read(SearchResult& Sresult){
+void read(SearchResult& Sresult) {
   Latte::Mid::Start("3) Read");
   Latte::Fast::Start("3.1) Read Init");
   auto vName = Sresult.reader->GetView<std::array<char, name_len>>("name");
   auto vAge = Sresult.reader->GetDirectAccessView<int>("age");
   Latte::Fast::Stop("3.1) Read Init");
-  std::cout 
-    << "[Sys] Found " << Sresult.matches.size() 
-    << " users named: " << std::string_view(Sresult.tName, name_len)
-    << "\n   Within a database made of " << Sresult.reader->GetNEntries() 
-    << " users" << '\n';
+  std::cout << "[Sys] Found " << Sresult.matches.size()
+            << " users named: " << std::string_view(Sresult.tName, name_len)
+            << "\n   Within a database made of "
+            << Sresult.reader->GetNEntries() << " users" << '\n';
 
-  for(auto&idx:Sresult.matches){
+  for (auto& idx : Sresult.matches) {
     const auto& nm = vName(idx);
     std::cout << "[" << idx << "]";
     std::cout << " [User]: ";
@@ -221,34 +215,93 @@ void read(SearchResult& Sresult){
   Latte::Hard::Stop("3) Read");
 }
 
+template <class function_type>
+std::pair<counters::event_aggregate, size_t> bench(
+    const function_type&& function,
+    size_t min_repeat = 10,
+    size_t min_time_ns = 40'000'000,
+    size_t max_repeat = 10'000'000) {
+  size_t N = min_repeat ? min_repeat : 1;
+  counters::event_aggregate warm_aggregate{};
+
+  for (size_t i = 0; i < N; ++i) {
+    std::atomic_thread_fence(std::memory_order_acquire);
+    collector.start();
+    function();
+    std::atomic_thread_fence(std::memory_order_release);
+
+    warm_aggregate << collector.end();
+    if ((i + 1 == N) && (warm_aggregate.total_elapsed_ns() < min_time_ns) &&
+        (N < max_repeat)) {
+      N *= 10;
+    }
+  }
+  counters::event_aggregate aggregate{};
+  for (size_t i = 0; i < 10; ++i) {
+    std::atomic_thread_fence(std::memory_order_acquire);
+    collector.start();
+    for (size_t j = 0; j < N; ++j) {
+      function();
+    }
+    std::atomic_thread_fence(std::memory_order_release);
+
+    aggregate << collector.end();
+  }
+  return {aggregate, N};
+}
+
+double pretty_print_array(const std::string& name,
+                          size_t num_chars,
+                          size_t num_elements,
+                          std::pair<counters::event_aggregate, size_t> result) {
+  const auto& agg = result.first;
+  size_t N = result.second;
+  num_chars *= N;
+  num_elements *= N;
+  printf("    %-28s : %8.2f ns/value %8.2f GB/s",
+         name.c_str(),
+         agg.elapsed_ns() / num_elements,
+         num_chars / agg.elapsed_ns());
+  if (collector.has_events()) {
+    printf(" %8.2f GHz %8.2f cycles/value %8.2f ins./value %8.2f i/c",
+           agg.cycles() / agg.elapsed_ns(),
+           agg.cycles() / num_elements,
+           agg.instructions() / num_elements,
+           agg.instructions() / agg.cycles());
+  }
+  printf("\n");
+  return num_chars / agg.elapsed_ns();
+}
 
 auto main() -> int {
   LIKWID_MARKER_INIT;
   LIKWID_MARKER_REGISTER("1_Write");
   LIKWID_MARKER_REGISTER("2_Search");
 #if RUN_O1SEARCH
-  std::cout << "[" << __TIME__ << "] Use O(1) via unordered_map"  << std::endl;
+  std::cout << "[" << __TIME__ << "] Use O(1) via unordered_map" << std::endl;
 #elif RUN_SIMDFSLSEARCH
   std::cout << "[" << __TIME__ << "] Iterative AVX512 + FSL" << std::endl;
 #elif RUN_SIMDFNV1ASEARCH
   std::cout << "[" << __TIME__ << "] Iterative AVX512 + fnv1a" << std::endl;
 #elif RUN_CONSTSEARCH
-  std::cout << "[" << __TIME__ << "] Iterative const size"  << std::endl;
+  std::cout << "[" << __TIME__ << "] Iterative const size" << std::endl;
 #elif RUN_BINARYSEARCH
-  std::cout << "[" << __TIME__ << "] Binary search"  << std::endl;
+  std::cout << "[" << __TIME__ << "] Binary search" << std::endl;
 #elif RUN_TREEBINARYSEARCH
-  std::cout << "[" << __TIME__ << "] Precomputed Binary Search"  << std::endl;
+  std::cout << "[" << __TIME__ << "] Precomputed Binary Search" << std::endl;
 #elif RUN_TREETERNARYSEARCH
-  std::cout << "[" << __TIME__ << "] Precomputed Ternary search"  << std::endl;
+  std::cout << "[" << __TIME__ << "] Precomputed Ternary search" << std::endl;
 #elif RUN_NOSEARCH
-  std::cout << "[" << __TIME__ << "] Baseline cost of iterating over RNTuple"  << std::endl;
+  std::cout << "[" << __TIME__ << "] Baseline cost of iterating over RNTuple"
+            << std::endl;
 #elif RUN_NOSEARCHHASH
-  std::cout << "[" << __TIME__ << "] Baseline cost of iterating over RNTuple with hash"  << std::endl;
-#else 
+  std::cout << "[" << __TIME__
+            << "] Baseline cost of iterating over RNTuple with hash"
+            << std::endl;
+#else
   std::cout << "No Parameter search function given, Abort()" << '\n';
   abort();
 #endif
-
 
   char tName[name_len] = {'a', 'l', 'i', 'c', 'e'};
   Latte::Mid::Start("Global");
@@ -256,66 +309,79 @@ auto main() -> int {
   write();
   LIKWID_MARKER_STOP("1_Write");
 
-
   SearchResult Sresult;
   LIKWID_MARKER_START("2_Search");
 #if RUN_O1SEARCH
-  Sresult = O1Search(tName); // academically fast O(1)
+  Sresult = O1Search(tName);  // academically fast O(1)
 #elif RUN_SIMDFSLSEARCH
-  Sresult = SIMD_FSL_Search(tName); // AVX512 with bloom first+second+last name char
+  Sresult =
+      SIMD_FSL_Search(tName);  // AVX512 with bloom first+second+last name char
 #elif RUN_SIMDFNV1ASEARCH
-  Sresult = SIMD_fnv1a_Search(tName); // AVX512 with bloom fnv1a hashing
+  Sresult = SIMD_fnv1a_Search(tName);  // AVX512 with bloom fnv1a hashing
 #elif RUN_CONSTSEARCH
-  Sresult = ConstSearch(tName); // constant name size
+  Sresult = ConstSearch(tName);  // constant name size
 #elif RUN_BINARYSEARCH
   sortAndSaveRNTuple();
-  Sresult = BinarySearch(tName); // Log2(N) search, branchless
+  Sresult = BinarySearch(tName);  // Log2(N) search, branchless
 #elif RUN_TREEBINARYSEARCH
   sortAndSaveRNTuple();
-  Sresult = TreeBinarySearch(tName); // Log2(N) search, memcmp style, add/sub
+  Sresult = TreeBinarySearch(tName);  // Log2(N) search, memcmp style, add/sub
 #elif RUN_TREETERNARYSEARCH
   sortAndSaveRNTuple();
-  Sresult = TreeTernarySearch(tName); // log3(N) search, branchless + fast-pass
+  Sresult = TreeTernarySearch(tName);  // log3(N) search, branchless + fast-pass
 #elif RUN_NOSEARCH
-  Sresult = NoSearch(tName); // iterations cost, no search
+  Sresult = NoSearch(tName);  // iterations cost, no search
 #elif RUN_NOSEARCHHASH
-  Sresult = NoSearchHash(tName); // iterations cost with fixed size uint32_t, no search
+  Sresult = NoSearchHash(
+      tName);  // iterations cost with fixed size uint32_t, no search
 #endif
   LIKWID_MARKER_STOP("2_Search");
-
 
   read(Sresult);
   Latte::Hard::Stop("Global");
 
-
-  Latte::DumpToStream(std::cout, Latte::Parameter::Time, Latte::Parameter::Calibrated);
+  Latte::DumpToStream(
+      std::cout, Latte::Parameter::Time, Latte::Parameter::Calibrated);
   auto snap_Search = Latte::Snapshot("2) Search")[0];
   double cycles_per_ns;
   LATTE_FREQ(cycles_per_ns);
-  std::cout << "Searching took: " << Latte::FormatTime(snap_Search/cycles_per_ns) << '\n';
-#if RUN_CONSTSEARCH || RUN_NOSEARCH || RUN_NOSEARCHHASH || RUN_SIMDFSLSEARCH || RUN_SIMDFNV1ASEARCH
+  std::cout << "Searching took: "
+            << Latte::FormatTime(snap_Search / cycles_per_ns) << '\n';
+#if RUN_CONSTSEARCH || RUN_NOSEARCH || RUN_NOSEARCHHASH || \
+    RUN_SIMDFSLSEARCH || RUN_SIMDFNV1ASEARCH
   std::cout << "[Expected] RNtuple search took "
-    << Latte::FormatTime((static_cast<double>(snap_Search)/static_cast<double>(N)*1'000'000.0)/cycles_per_ns)
-    << " per 1M iters " << '\n';
+            << Latte::FormatTime((static_cast<double>(snap_Search) /
+                                  static_cast<double>(N) * 1'000'000.0) /
+                                 cycles_per_ns)
+            << " per 1M iters " << '\n';
 #elif RUN_TREEBINARYSEARCH || RUN_BINARYSEARCH
   std::cout << "[Expected] RNtuple search took "
-    << Latte::FormatTime((static_cast<double>(snap_Search)/static_cast<double>(std::bit_width(N)))/cycles_per_ns)
-    << " per depth ("<< std::bit_width(N)<< ")" << '\n';
+            << Latte::FormatTime((static_cast<double>(snap_Search) /
+                                  static_cast<double>(std::bit_width(N))) /
+                                 cycles_per_ns)
+            << " per depth (" << std::bit_width(N) << ")" << '\n';
 
 #elif RUN_TREETERNARYSEARCH
   std::cout << "[Expected] RNtuple search took "
-    << Latte::FormatTime((static_cast<double>(snap_Search)/static_cast<double>(std::bit_width(N)))/cycles_per_ns)
-    << " per depth ("<< TernaryTreeDepth(N) << ")" << '\n';
+            << Latte::FormatTime((static_cast<double>(snap_Search) /
+                                  static_cast<double>(std::bit_width(N))) /
+                                 cycles_per_ns)
+            << " per depth (" << TernaryTreeDepth(N) << ")" << '\n';
 
-#endif //O1 doesnt need print
+#endif  //O1 doesnt need print
 
   auto LargeFormat = [](double val) -> std::string {
     const char* units[] = {"", "K", "M", "B", "T"};
     int unit_idx = 0;
-    while (val >= 1000.0 && unit_idx < 4) { val /= 1000.0; unit_idx++; }
+    while (val >= 1000.0 && unit_idx < 4) {
+      val /= 1000.0;
+      unit_idx++;
+    }
     std::ostringstream ss;
-    if (unit_idx == 0) ss << std::fixed << std::setprecision(0) << val;
-    else ss << std::fixed << std::setprecision(2) << val << " " << units[unit_idx];
+    if (unit_idx == 0)
+      ss << std::fixed << std::setprecision(0) << val;
+    else
+      ss << std::fixed << std::setprecision(2) << val << " " << units[unit_idx];
     return ss.str();
   };
 
@@ -324,4 +390,3 @@ auto main() -> int {
 
   LIKWID_MARKER_CLOSE;
 }
-
