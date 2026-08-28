@@ -524,6 +524,10 @@ auto BinarySearch(const char (&tName)[name_len]) -> SearchResult {
 }
 
 
+static inline auto BinaryTreeDepth(uint64_t N) -> int {
+  return std::bit_width(N)-1;
+}
+
 
 void BuildBinaryTree(
   ROOT::RNTupleDirectAccessView<uint32_t>& vHName,
@@ -607,35 +611,25 @@ auto TreeBinarySearch(const char (&tName)[name_len]) -> SearchResult {
 
 void BuildTernaryTree(
   ROOT::RNTupleDirectAccessView<uint32_t>& vHName,
-  std::vector<uint32_t>& tree_lo,
-  std::vector<uint32_t>& tree_hi,
-  std::vector<uint32_t>& tree_row,
-  std::vector<uint32_t>& tree_row_hi,
-  int64_t start, int64_t stop, size_t idx)
+  std::vector<uint32_t>& tree_v,
+  std::vector<uint32_t>& tree_i,
+  int64_t start, int64_t stop, size_t node_idx)
 {
   if (start > stop) return;
-
-  const int64_t low = start + (stop - start) / 3;
+  const int64_t low  = start + (stop - start) / 3;
   const int64_t high = start + 2 * (stop - start) / 3;
 
-  // One node = one heap index. Two keys (lo, hi) split the range in 3;
-  // children live at 3*idx+{1,2,3}. Never pack the second key into idx+1:
-  // that slot belongs to the next node / the left child.
-  tree_lo[idx]      = vHName(static_cast<uint64_t>(low));  //DB value
-  tree_hi[idx]      = vHName(static_cast<uint64_t>(high)); //DB value
-  tree_row[idx]     = static_cast<uint32_t>(low);          //row of the lo key
-  tree_row_hi[idx]  = static_cast<uint32_t>(high);         //row of the hi key (hi row can be in a DIFFERENT hash-run than lo)
+  const size_t base = 2 * node_idx;          // two slots per node
+  tree_v[base]     = vHName(low);
+  tree_i[base]     = low;
+  tree_v[base + 1] = vHName(high);
+  tree_i[base + 1] = high;
 
-  BuildTernaryTree(vHName, tree_lo, tree_hi, tree_row, tree_row_hi, start, low - 1, 3 * idx + 1);    //left
-  BuildTernaryTree(vHName, tree_lo, tree_hi, tree_row, tree_row_hi, low + 1, high - 1, 3 * idx + 2); //mid
-  BuildTernaryTree(vHName, tree_lo, tree_hi, tree_row, tree_row_hi, high + 1, stop, 3 * idx + 3);    //right
+  BuildTernaryTree(vHName, tree_v, tree_i, start, low - 1,   3 * node_idx + 1);
+  BuildTernaryTree(vHName, tree_v, tree_i, low + 1, high - 1, 3 * node_idx + 2);
+  BuildTernaryTree(vHName, tree_v, tree_i, high + 1, stop,   3 * node_idx + 3);
 }
 
-
-
-static inline auto BinaryTreeDepth(uint64_t N) -> int {
-  return std::bit_width(N)-1;
-}
 static inline auto TernaryTreeDepth(const uint64_t N) -> int {
   if (N <= 0) return -1;
   double val = 2.0 * (double)N - 1.0;
@@ -652,21 +646,13 @@ auto TreeTernarySearch(const char (&tName)[name_len]) -> SearchResult {
   auto vHName = reader->GetDirectAccessView<uint32_t>("hash_name");
   auto vName = reader->GetView<std::array<char, name_len>>("name");
 
-  const auto nEntries = reader->GetNEntries();
-  if (nEntries == 0) return SearchResult(std::move(reader), {}, tName);
-
-  const int depth = TernaryTreeDepth(nEntries);
-  size_t cap = 1;
-  for (int i = 0; i <= depth; ++i) cap *= 3;
-  const size_t node_cap = (cap - 1) / 2;
-
-  std::vector<uint32_t> tree_lo(node_cap, 0);
-  std::vector<uint32_t> tree_hi(node_cap, 0);
-  std::vector<uint32_t> tree_row(node_cap, UINT32_MAX);    // UINT32_MAX = empty slot (rows < 2^31)
-  std::vector<uint32_t> tree_row_hi(node_cap, UINT32_MAX); // row of the hi key
+  constexpr auto depth = 17; //TernaryTreeDepth(N);
+  size_t node_cap = (std::pow(3, depth + 1) - 1) / 2;
+  std::vector<uint32_t> tree_v(2 * node_cap, UINT32_MAX);
+  std::vector<uint32_t> tree_i(2 * node_cap, UINT32_MAX);
 
   Latte::Fast::Start("BuildTree");
-  BuildTernaryTree(vHName, tree_lo, tree_hi, tree_row, tree_row_hi, 0, static_cast<int64_t>(nEntries) - 1, 0);
+  BuildTernaryTree(vHName, tree_v, tree_i, 0, N - 1, 0);
   Latte::Fast::Stop("BuildTree");
 
 
@@ -676,19 +662,27 @@ auto TreeTernarySearch(const char (&tName)[name_len]) -> SearchResult {
   Latte::Fast::Start("2) Search");
   uint32_t key = fnv1a(tName, name_len);
   Latte::Fast::Start("2.1) Search Body");
-  
-  size_t idx = 0;
-  bool found = false;
-  uint64_t row = 0;
 
-  while (idx < node_cap) {
-    if (tree_row[idx] == UINT32_MAX) break; // empty slot (hole / past the tree) -> not found
-    const uint32_t lo = tree_lo[idx];
-    const uint32_t hi = tree_hi[idx];
-    if (key == lo) { found = true; row = tree_row[idx]; break; }
-    if (key == hi) { found = true; row = tree_row_hi[idx]; break; }
-    // branchless descent: off = 0:left, 1:mid, 2:right -> children at 3*idx+{1,2,3}
-    idx = 3 * idx + 2 + (key > hi) - (key < lo);
+  uint64_t idx = 0;
+  uint64_t found = 0;
+
+  #pragma unroll(depth)
+  for (int d = 0; d < depth; ++d) {
+    const size_t base = 2 * idx;
+    const uint32_t low  = tree_v[base];
+    const uint32_t high = tree_v[base + 1];
+
+    const int off = 1 + (key > high) - (key < low); // 0 left, 1 mid, 2 right
+
+    const bool mask_low  = (key == low);
+    const bool mask_high = (key == high);
+
+    //const bool mask_side = (key==high); //== ((!(key==low)) | (key==high)) -> (1 0) or (0 1) ->! (0 0) or (1 1) ->| 0 or 1
+    //found = (idx+mask_high & mask_pass) | (found & ~mask_pass);
+    found = (off == 1) & (mask_low | mask_high) ? base + mask_high : found;  //fast path.  off==1 only if off=1+0-0
+
+    idx = 3 * idx + off + 1;
+    //LATTE_PULSE("2.1.1) BODY LOOP");
   }
 
   /*
@@ -731,10 +725,11 @@ auto TreeTernarySearch(const char (&tName)[name_len]) -> SearchResult {
 
   Latte::Fast::Start("2.2) Search Tail");
   if (found) { //vName is IO bottleneck
+    uint64_t row = tree_i[found];
     uint64_t lo = row;
     while (lo > 0 && vHName(lo - 1) == key) --lo;
     uint64_t hi = row;
-    while (hi + 1 < nEntries && vHName(hi + 1) == key) ++hi;
+    while (hi + 1 < N && vHName(hi + 1) == key) ++hi;
 
     for (uint64_t r = lo; r <= hi; ++r) {
       if (std::memcmp(tName, vName(r).data(), name_len) == 0) matches.push_back(r);
@@ -891,6 +886,12 @@ auto main() -> int{
   std::cout << "[Expected] RNtuple search took "
     << Latte::FormatTime((static_cast<double>(snap_Search)/static_cast<double>(std::bit_width(N)))/cycles_per_ns)
     << " per depth ("<< std::bit_width(N)<< ")" << '\n';
+
+#elif RUN_TREETERNARYSEARCH
+  std::cout << "[Expected] RNtuple search took "
+    << Latte::FormatTime((static_cast<double>(snap_Search)/static_cast<double>(std::bit_width(N)))/cycles_per_ns)
+    << " per depth ("<< TernaryTreeDepth(N) << ")" << '\n';
+
 #endif //O1 doesnt need print
 
   auto LargeFormat = [](double val) -> std::string {
