@@ -54,7 +54,6 @@
   hottest sensor                               59C
 */
 
-#include <Rtypes.h>
 #include <likwid-marker.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,7 +65,6 @@
 #include <ROOT/RNTupleWriter.hxx>
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -74,6 +72,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <numeric>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -139,7 +138,8 @@ static auto RNG_int(XorPRNG& rng) -> int {
 
 static void saveIndex(
     const std::unordered_map<uint32_t, std::vector<uint64_t>>& index,
-    const std::string& path) {
+    const std::string& path
+) {
   std::ofstream f(path, std::ios::binary);
 
   uint64_t mapSize = index.size();
@@ -149,8 +149,9 @@ static void saveIndex(
     f.write(reinterpret_cast<const char*>(&hash), sizeof(hash));
     uint64_t rowCount = rows.size();
     f.write(reinterpret_cast<const char*>(&rowCount), sizeof(rowCount));
-    f.write(reinterpret_cast<const char*>(rows.data()),
-            rowCount * sizeof(uint64_t));
+    f.write(
+        reinterpret_cast<const char*>(rows.data()), rowCount * sizeof(uint64_t)
+    );
   }
 }
 
@@ -170,7 +171,8 @@ void write() {
       std::move(model),
       "Users",
       "./data/search/users.root",
-      opts);  // when writer destructed, it write the footer in file
+      opts
+  );  // when writer destructed, it write the footer in file
   //1) Fill() × 50k        ->  fills in-memory column buffers (pages)
   //1.2) page full (~64KB)   ->  page gets compressed (Optional, LZ4 here)
   //3) cluster threshold   ->  all column pages flushed to disk as one cluster (~50MB default)
@@ -190,7 +192,7 @@ void write() {
     std::memcpy(name->data(), user, name_len);
     *hash_name = huser;
     *age = RNG_int(rng);
-    writer->Fill();  // Sit in ram, pushed by cluster
+    LATTE_FIELD(writer->Fill());  // per-row write latency (span id = "write")
 #if RUN_O1SEARCH
     index[huser].push_back(i);
 #endif
@@ -206,6 +208,7 @@ void write() {
 
 
 void read(SearchResult& Sresult) {
+  Latte::Fast::Start("read");
   Latte::Mid::Start("3) Read");
   Latte::Fast::Start("3.1) Read Init");
   auto vName = Sresult.reader->GetView<std::array<char, name_len>>("name");
@@ -225,6 +228,7 @@ void read(SearchResult& Sresult) {
     LATTE_PULSE("3.2) Read Findings");
   }
   Latte::Hard::Stop("3) Read");
+  Latte::Fast::Stop("read");
 }
 
 
@@ -233,7 +237,8 @@ std::pair<counters::event_aggregate, size_t> bench(
     Fn&& fn,
     size_t min_repeat = 10,
     size_t min_time_ns = 40'000'000,
-    size_t max_repeat = 10'000'000) {
+    size_t max_repeat = 10'000'000
+) {
   size_t n = min_repeat ? min_repeat : 1;
   counters::event_aggregate warm_aggregate{};
 
@@ -278,34 +283,27 @@ static void format_compact(double v, char* buf) {
 
 
 void pretty_print_search(
-    const char* name,
     const std::pair<counters::event_aggregate, size_t>& result,
     double norm_divisor = 1.0,
-    const char* norm_unit = "search") {
+    const char* norm_unit = "search"
+) {
   const auto& agg = result.first;
   const size_t reps = result.second;
-  printf("    %-28s : %10s/search  (%zu iters x %d rounds, fastest %s)\n",
-         name,
-         Latte::FormatTime(agg.elapsed_ns()).c_str(),
-         reps,
-         agg.iteration_count(),
-         Latte::FormatTime(agg.fastest_elapsed_ns()).c_str());
   if (collector.has_events() && agg.cycles() > 0.0) {
     const double ipc = agg.instructions() / agg.cycles();
     char cyc_buf[16];
     char ins_buf[16];
     format_compact(agg.cycles() / norm_divisor, cyc_buf);
     format_compact(agg.instructions() / norm_divisor, ins_buf);
-    printf("        cycles %7s/%s  ins %7s/%s  i/c %5.2f",
-           cyc_buf,
-           norm_unit,
-           ins_buf,
-           norm_unit,
-           ipc);
+    printf("  %-10s %7s / %s\n", "cycles", cyc_buf, norm_unit);
+    printf("  %-10s %7s / %s\n", "ins", ins_buf, norm_unit);
+    printf("  %-10s %5.2f\n", "i/c", ipc);
     if (agg.branches() > 0.0)
-      printf("  br-miss %5.2f%%", 100.0 * agg.branch_misses() / agg.branches());
-    printf("  cache-miss/1k-ins %5.2f\n",
-           1000.0 * agg.cache_misses() / agg.instructions());
+      printf(
+          "  %-10s %5.2f%%\n",
+          "br-miss",
+          100.0 * agg.branch_misses() / agg.branches()
+      );
   }
 }
 
@@ -315,37 +313,27 @@ auto main() -> int {
   LIKWID_MARKER_REGISTER("1_Write");
   LIKWID_MARKER_REGISTER("2_Search");
 
-  const char* variant = "";
   SearchResult (*search_fn)(const char (&)[name_len]) = nullptr;
   double norm_divisor = 1.0;
   const char* norm_unit = "search";
 
 #if RUN_O1SEARCH
-  variant = "Use O(1) via unordered_map";
   search_fn = O1Search;
 #elif RUN_SIMDFSLSEARCH
-  variant = "Iterative AVX512 + FSL";
   search_fn = SIMD_FSL_Search;
 #elif RUN_SIMDFNV1ASEARCH
-  variant = "Iterative AVX512 + fnv1a";
   search_fn = SIMD_fnv1a_Search;
 #elif RUN_CONSTSEARCH
-  variant = "Iterative const size";
   search_fn = ConstSearch;
 #elif RUN_BINARYSEARCH
-  variant = "Binary search";
   search_fn = BinarySearch;
 #elif RUN_TREEBINARYSEARCH
-  variant = "Precomputed Binary Search";
   search_fn = TreeBinarySearch;
 #elif RUN_TREETERNARYSEARCH
-  variant = "Precomputed Ternary search";
   search_fn = TreeTernarySearch;
 #elif RUN_NOSEARCH
-  variant = "Baseline cost of iterating over RNTuple";
   search_fn = NoSearch;
 #elif RUN_NOSEARCHHASH
-  variant = "Baseline cost of iterating over RNTuple with hash";
   search_fn = NoSearchHash;
 #else
   std::cout << "No Parameter search function given, Abort()" << '\n';
@@ -364,25 +352,16 @@ auto main() -> int {
   norm_unit = "depth";
 #endif
 
-  std::cout << "[" << __TIME__ << "] " << variant << std::endl;
+  std::cout << "[" << __TIME__ << "]" << std::endl;
 
   char tName[name_len] = {'a', 'l', 'i', 'c', 'e'};
-  Latte::Mid::Start("Global");
 
-  double write_ns = 0.0;
-  auto t0 = std::chrono::steady_clock::now();
+
   LIKWID_MARKER_START("1_Write");
-  write();
+  LATTE_FIELD(write());
   LIKWID_MARKER_STOP("1_Write");
-  auto t1 = std::chrono::steady_clock::now();
-  write_ns = std::chrono::duration<double, std::nano>(t1 - t0).count();
-
 #if RUN_BINARYSEARCH || RUN_TREEBINARYSEARCH || RUN_TREETERNARYSEARCH
-  double sort_ns = 0.0;
-  t0 = std::chrono::steady_clock::now();
-  sortAndSaveRNTuple();
-  t1 = std::chrono::steady_clock::now();
-  sort_ns = std::chrono::duration<double, std::nano>(t1 - t0).count();
+  LATTE_FIELD(sortAndSaveRNTuple());
 #endif
 
   LIKWID_MARKER_START("2_Search");
@@ -391,21 +370,43 @@ auto main() -> int {
   LIKWID_MARKER_STOP("2_Search");
 
   SearchResult Sresult = search_fn(tName);
-  read(Sresult);
-  Latte::Hard::Stop("Global");
+  LATTE_FIELD(read(Sresult));
 
-  Latte::DumpToStream(
-      std::cout, Latte::Parameter::Time, Latte::Parameter::Calibrated);
+  Latte::DumpToStream(std::cout, Latte::Parameter::Time);
 
-  printf("Write        : %s\n", Latte::FormatTime(write_ns).c_str());
+
+  auto avg_ns = [](const std::vector<double>& ns) -> double {
+    return ns.empty() ? 0.0 : std::reduce(ns.begin(), ns.end()) / ns.size();
+  };
+
+  printf(
+      "%-10s: %s\n",
+      "Write",
+      Latte::FormatTime(avg_ns(Latte::Snapshot("1) Write").to_ns())).c_str()
+  );
 #if RUN_BINARYSEARCH || RUN_TREEBINARYSEARCH || RUN_TREETERNARYSEARCH
-  printf("Sort         : %s\n", Latte::FormatTime(sort_ns).c_str());
+  printf(
+      "%-10s: %s\n",
+      "Sort",
+      Latte::FormatTime(avg_ns(Latte::Snapshot("Sort RNTuple").to_ns())).c_str()
+  );
 #endif
-  printf("Search       :\n");
-  pretty_print_search(variant, result, norm_divisor, norm_unit);
-  printf("    [Expected] %s / %s\n",
-         Latte::FormatTime(result.first.elapsed_ns() / norm_divisor).c_str(),
-         norm_unit);
+  printf(
+      "%-10s: %s\n",
+      "Search",
+      Latte::FormatTime(avg_ns(Latte::Snapshot("2) Search").to_ns())).c_str()
+  );
+  pretty_print_search(result, norm_divisor, norm_unit);
+  printf(
+      "  Search/%s: %s\n",
+      norm_unit,
+      Latte::FormatTime(result.first.elapsed_ns() / norm_divisor).c_str()
+  );
+  printf(
+      "%-10s: %s\n",
+      "Read",
+      Latte::FormatTime(avg_ns(Latte::Snapshot("read").to_ns())).c_str()
+  );
 
   auto LargeFormat = [](double val) -> std::string {
     const char* units[] = {"", "K", "M", "B", "T"};
@@ -422,8 +423,7 @@ auto main() -> int {
     return ss.str();
   };
 
-  std::cout << "Total Rows: " << LargeFormat(N);
-  std::cout << '\n';
+  printf("%-10s: %s\n", "Total Rows", LargeFormat(N).c_str());
 
   LIKWID_MARKER_CLOSE;
 }

@@ -70,6 +70,7 @@ consteval auto TernaryTreeDepth(const uint64_t n) -> int {
 
 
 void sortAndSaveRNTuple() {
+  Latte::Fast::Start("sortAndSaveRNTuple");
   Latte::Fast::Start("Sort RNTuple");
 
   // Read the RNTuple
@@ -122,6 +123,7 @@ void sortAndSaveRNTuple() {
 
   Latte::Fast::Stop("Writing sorted data");
   Latte::Fast::Stop("Sort RNTuple");
+  Latte::Fast::Stop("sortAndSaveRNTuple");
 }
 
 

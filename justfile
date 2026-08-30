@@ -13,7 +13,20 @@ o_loop := " -funroll-loops -fprefetch-loop-arrays -falign-functions=32 -falign-l
 o_code := " -fno-plt -fno-semantic-interposition -fno-stack-protector -fvect-cost-model=unlimited"
 o_link := " -flto -Wl,-O3 -Wl,--as-needed -pipe"
 
-hpc := o_base + o_math + o_loop + o_code + o_link
+# DWARF debug info: "0"/"off"/"none" disables; otherwise adds -g -gdwarf-<N> (default 4)
+dwarf := env_var_or_default("DWARF", "4")
+
+dwarf_flags := if dwarf == "0" {
+    ""
+} else if dwarf == "off" {
+    ""
+} else if dwarf == "none" {
+    ""
+} else {
+    " -g -gdwarf-" + dwarf
+}
+
+hpc := o_base + o_math + o_loop + o_code + o_link + dwarf_flags
 
 
 default:
