@@ -55,8 +55,6 @@
 */
 
 #include <likwid-marker.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include <ROOT/RNTupleModel.hxx>
 #include <ROOT/RNTupleReader.hxx>
@@ -65,14 +63,17 @@
 #include <ROOT/RNTupleWriter.hxx>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <numeric>
+#include <print>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -91,6 +92,36 @@
 #include "include/treebinary.hpp"
 #include "include/treeternary.hpp"
 #include "latte.hpp"
+
+// Every RUN_* switch defaults to 0 so `if constexpr` works even when the
+// justfile only defines the active one.
+#ifndef RUN_O1SEARCH
+  #define RUN_O1SEARCH 0
+#endif
+#ifndef RUN_SIMDFSLSEARCH
+  #define RUN_SIMDFSLSEARCH 0
+#endif
+#ifndef RUN_SIMDFNV1ASEARCH
+  #define RUN_SIMDFNV1ASEARCH 0
+#endif
+#ifndef RUN_CONSTSEARCH
+  #define RUN_CONSTSEARCH 0
+#endif
+#ifndef RUN_BINARYSEARCH
+  #define RUN_BINARYSEARCH 0
+#endif
+#ifndef RUN_TREEBINARYSEARCH
+  #define RUN_TREEBINARYSEARCH 0
+#endif
+#ifndef RUN_TREETERNARYSEARCH
+  #define RUN_TREETERNARYSEARCH 0
+#endif
+#ifndef RUN_NOSEARCH
+  #define RUN_NOSEARCH 0
+#endif
+#ifndef RUN_NOSEARCHHASH
+  #define RUN_NOSEARCHHASH 0
+#endif
 
 counters::event_collector collector;
 
@@ -180,10 +211,7 @@ void write() {
 
   Latte::Fast::Stop("1.1) Write init");
 
-#if RUN_O1SEARCH
-  std::unordered_map<uint32_t, std::vector<uint64_t>>
-      index;  //O(1) search if you know what will be searched
-#endif
+  [[maybe_unused]] std::unordered_map<uint32_t, std::vector<uint64_t>> index;
   XorPRNG rng;
   for (int i = 0; std::cmp_less(i, N); ++i) {
     char user[name_len];
@@ -193,16 +221,16 @@ void write() {
     *hash_name = huser;
     *age = RNG_int(rng);
     LATTE_FIELD(writer->Fill());  // per-row write latency (span id = "write")
-#if RUN_O1SEARCH
-    index[huser].push_back(i);
-#endif
+    if constexpr (RUN_O1SEARCH) {
+      index[huser].push_back(i);
+    }
     LATTE_PULSE("1.2) Write Loop");
   }
-#if RUN_O1SEARCH
-  Latte::Fast::Start("1.3) Write SaveIndex");
-  saveIndex(index, "./data/search/users.idx");
-  Latte::Fast::Stop("1.3) Write SaveIndex");
-#endif
+  if constexpr (RUN_O1SEARCH) {
+    Latte::Fast::Start("1.3) Write SaveIndex");
+    saveIndex(index, "./data/search/users.idx");
+    Latte::Fast::Stop("1.3) Write SaveIndex");
+  }
   Latte::Fast::Stop("1) Write");
 }
 
@@ -232,9 +260,9 @@ void read(SearchResult& Sresult) {
 }
 
 
-template <class Fn>
+template <auto SEARCH>
 std::pair<counters::event_aggregate, size_t> bench(
-    Fn&& fn,
+    const char (&tName)[name_len],
     size_t min_repeat = 10,
     size_t min_time_ns = 40'000'000,
     size_t max_repeat = 10'000'000
@@ -245,7 +273,7 @@ std::pair<counters::event_aggregate, size_t> bench(
   for (size_t i = 0; i < n; ++i) {
     std::atomic_thread_fence(std::memory_order_acquire);
     collector.start();
-    std::invoke(fn);
+    std::invoke(SEARCH, tName);
     std::atomic_thread_fence(std::memory_order_release);
 
     warm_aggregate << collector.end();
@@ -260,7 +288,7 @@ std::pair<counters::event_aggregate, size_t> bench(
     std::atomic_thread_fence(std::memory_order_acquire);
     collector.start();
     for (size_t j = 0; j < n; ++j) {
-      std::invoke(fn);
+      std::invoke(SEARCH, tName);
     }
     std::atomic_thread_fence(std::memory_order_release);
 
@@ -270,15 +298,15 @@ std::pair<counters::event_aggregate, size_t> bench(
 }
 
 
-static void format_compact(double v, char* buf) {
+static std::string format_compact(double v) {
   if (v >= 1e9)
-    snprintf(buf, 16, "%.2f G", v / 1e9);
+    return std::format("{:.2f} G", v / 1e9);
   else if (v >= 1e6)
-    snprintf(buf, 16, "%.2f M", v / 1e6);
+    return std::format("{:.2f} M", v / 1e6);
   else if (v >= 1e3)
-    snprintf(buf, 16, "%.2f K", v / 1e3);
+    return std::format("{:.2f} K", v / 1e3);
   else
-    snprintf(buf, 16, "%.2f", v);
+    return std::format("{:.2f}", v);
 }
 
 
@@ -291,19 +319,58 @@ void pretty_print_search(
   const size_t reps = result.second;
   if (collector.has_events() && agg.cycles() > 0.0) {
     const double ipc = agg.instructions() / agg.cycles();
-    char cyc_buf[16];
-    char ins_buf[16];
-    format_compact(agg.cycles() / norm_divisor, cyc_buf);
-    format_compact(agg.instructions() / norm_divisor, ins_buf);
-    printf("  %-10s %7s / %s\n", "cycles", cyc_buf, norm_unit);
-    printf("  %-10s %7s / %s\n", "ins", ins_buf, norm_unit);
-    printf("  %-10s %5.2f\n", "i/c", ipc);
+    const std::string cyc = format_compact(agg.cycles() / norm_divisor);
+    const std::string ins = format_compact(agg.instructions() / norm_divisor);
+    std::println("  {:<10} {:>7} / {}", "cycles", cyc, norm_unit);
+    std::println("  {:<10} {:>7} / {}", "ins", ins, norm_unit);
+    std::println("  {:<10} {:5.2f}", "i/c", ipc);
     if (agg.branches() > 0.0)
-      printf(
-          "  %-10s %5.2f%%\n",
+      std::println(
+          "  {:<10} {:5.2f}%",
           "br-miss",
           100.0 * agg.branch_misses() / agg.branches()
       );
+  }
+}
+
+
+using SearchFn = SearchResult (*)(const char (&)[name_len]);
+
+consteval SearchFn select_search() {
+  if constexpr (RUN_O1SEARCH) return &O1Search;
+  if constexpr (RUN_SIMDFSLSEARCH) return &SIMD_FSL_Search;
+  if constexpr (RUN_SIMDFNV1ASEARCH) return &SIMD_fnv1a_Search;
+  if constexpr (RUN_CONSTSEARCH) return &ConstSearch;
+  if constexpr (RUN_BINARYSEARCH) return &BinarySearch;
+  if constexpr (RUN_TREEBINARYSEARCH) return &TreeBinarySearch;
+  if constexpr (RUN_TREETERNARYSEARCH) return &TreeTernarySearch;
+  if constexpr (RUN_NOSEARCH) return &NoSearch;
+  if constexpr (RUN_NOSEARCHHASH) return &NoSearchHash;
+  return nullptr;
+}
+
+
+constexpr SearchFn search_fn = select_search();
+static_assert(search_fn != nullptr, "no RUN_* search selected");
+
+struct NormSpec {
+  double divisor;
+  const char* unit;
+};
+
+
+constexpr NormSpec norm_spec() {
+  if constexpr (
+      RUN_CONSTSEARCH || RUN_NOSEARCH || RUN_NOSEARCHHASH ||
+      RUN_SIMDFSLSEARCH || RUN_SIMDFNV1ASEARCH
+  ) {
+    return {static_cast<double>(N) / 1'000'000.0, "1M rows"};
+  } else if constexpr (RUN_TREEBINARYSEARCH || RUN_BINARYSEARCH) {
+    return {static_cast<double>(std::bit_width(N)), "depth"};
+  } else if constexpr (RUN_TREETERNARYSEARCH) {
+    return {static_cast<double>(TernaryTreeDepth(N)), "depth"};
+  } else {
+    return {1.0, "search"};
   }
 }
 
@@ -313,60 +380,21 @@ auto main() -> int {
   LIKWID_MARKER_REGISTER("1_Write");
   LIKWID_MARKER_REGISTER("2_Search");
 
-  SearchResult (*search_fn)(const char (&)[name_len]) = nullptr;
-  double norm_divisor = 1.0;
-  const char* norm_unit = "search";
-
-#if RUN_O1SEARCH
-  search_fn = O1Search;
-#elif RUN_SIMDFSLSEARCH
-  search_fn = SIMD_FSL_Search;
-#elif RUN_SIMDFNV1ASEARCH
-  search_fn = SIMD_fnv1a_Search;
-#elif RUN_CONSTSEARCH
-  search_fn = ConstSearch;
-#elif RUN_BINARYSEARCH
-  search_fn = BinarySearch;
-#elif RUN_TREEBINARYSEARCH
-  search_fn = TreeBinarySearch;
-#elif RUN_TREETERNARYSEARCH
-  search_fn = TreeTernarySearch;
-#elif RUN_NOSEARCH
-  search_fn = NoSearch;
-#elif RUN_NOSEARCHHASH
-  search_fn = NoSearchHash;
-#else
-  std::cout << "No Parameter search function given, Abort()" << '\n';
-  abort();
-#endif
-
-#if RUN_CONSTSEARCH || RUN_NOSEARCH || RUN_NOSEARCHHASH || \
-    RUN_SIMDFSLSEARCH || RUN_SIMDFNV1ASEARCH
-  norm_divisor = static_cast<double>(N) / 1'000'000.0;
-  norm_unit = "1M rows";
-#elif RUN_TREEBINARYSEARCH || RUN_BINARYSEARCH
-  norm_divisor = static_cast<double>(std::bit_width(N));
-  norm_unit = "depth";
-#elif RUN_TREETERNARYSEARCH
-  norm_divisor = static_cast<double>(TernaryTreeDepth(N));
-  norm_unit = "depth";
-#endif
-
-  std::cout << "[" << __TIME__ << "]" << std::endl;
+  std::println("[{}]", __TIME__);
 
   char tName[name_len] = {'a', 'l', 'i', 'c', 'e'};
-
 
   LIKWID_MARKER_START("1_Write");
   LATTE_FIELD(write());
   LIKWID_MARKER_STOP("1_Write");
-#if RUN_BINARYSEARCH || RUN_TREEBINARYSEARCH || RUN_TREETERNARYSEARCH
-  LATTE_FIELD(sortAndSaveRNTuple());
-#endif
+  if constexpr (
+      RUN_BINARYSEARCH || RUN_TREEBINARYSEARCH || RUN_TREETERNARYSEARCH
+  ) {
+    LATTE_FIELD(sortAndSaveRNTuple());
+  }
 
   LIKWID_MARKER_START("2_Search");
-  auto result =
-      bench([&] { return search_fn(tName); }, 1, 40'000'000, 10'000'000);
+  auto result = bench<search_fn>(tName, 1, 40'000'000, 10'000'000);
   LIKWID_MARKER_STOP("2_Search");
 
   SearchResult Sresult = search_fn(tName);
@@ -379,33 +407,37 @@ auto main() -> int {
     return ns.empty() ? 0.0 : std::reduce(ns.begin(), ns.end()) / ns.size();
   };
 
-  printf(
-      "%-10s: %s\n",
+  constexpr NormSpec norm = norm_spec();
+
+  std::println(
+      "{:<10}: {}",
       "Write",
-      Latte::FormatTime(avg_ns(Latte::Snapshot("1) Write").to_ns())).c_str()
+      Latte::FormatTime(avg_ns(Latte::Snapshot("1) Write").to_ns()))
   );
-#if RUN_BINARYSEARCH || RUN_TREEBINARYSEARCH || RUN_TREETERNARYSEARCH
-  printf(
-      "%-10s: %s\n",
-      "Sort",
-      Latte::FormatTime(avg_ns(Latte::Snapshot("Sort RNTuple").to_ns())).c_str()
-  );
-#endif
-  printf(
-      "%-10s: %s\n",
+  if constexpr (
+      RUN_BINARYSEARCH || RUN_TREEBINARYSEARCH || RUN_TREETERNARYSEARCH
+  ) {
+    std::println(
+        "{:<10}: {}",
+        "Sort",
+        Latte::FormatTime(avg_ns(Latte::Snapshot("Sort RNTuple").to_ns()))
+    );
+  }
+  std::println(
+      "{:<10}: {}",
       "Search",
-      Latte::FormatTime(avg_ns(Latte::Snapshot("2) Search").to_ns())).c_str()
+      Latte::FormatTime(avg_ns(Latte::Snapshot("2) Search").to_ns()))
   );
-  pretty_print_search(result, norm_divisor, norm_unit);
-  printf(
-      "  Search/%s: %s\n",
-      norm_unit,
-      Latte::FormatTime(result.first.elapsed_ns() / norm_divisor).c_str()
+  pretty_print_search(result, norm.divisor, norm.unit);
+  std::println(
+      "  Search/{}: {}",
+      norm.unit,
+      Latte::FormatTime(result.first.elapsed_ns() / norm.divisor)
   );
-  printf(
-      "%-10s: %s\n",
+  std::println(
+      "{:<10}: {}",
       "Read",
-      Latte::FormatTime(avg_ns(Latte::Snapshot("read").to_ns())).c_str()
+      Latte::FormatTime(avg_ns(Latte::Snapshot("read").to_ns()))
   );
 
   auto LargeFormat = [](double val) -> std::string {
@@ -423,7 +455,7 @@ auto main() -> int {
     return ss.str();
   };
 
-  printf("%-10s: %s\n", "Total Rows", LargeFormat(N).c_str());
+  std::println("{:<10}: {}", "Total Rows", LargeFormat(N));
 
   LIKWID_MARKER_CLOSE;
 }

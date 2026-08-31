@@ -5,7 +5,8 @@ src        := "FastSearch.cpp"
 data       := "data/search"
 bindir     := "bin"
 
-root_flags := `root-config --cflags --libs` + " -llikwid"
+# Strip ROOT's own -std flag so the project standard (-std=c++23) wins.
+root_flags := `root-config --cflags | sed 's/ -std=[^ ]*//'` + " " + `root-config --libs` + " -llikwid"
 
 o_base := "-O3 -march=native -DLIKWID_PERFMON"
 o_math := " -ffast-math"
@@ -43,56 +44,56 @@ build: build-o1 build-fsl build-fnv1a build-bin build-treeter build-treebin buil
 
 build-o1:
     mkdir -p {{bindir}} {{data}}
-    g++ -std=c++20 {{hpc}} -DRUN_O1SEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_o1
+    g++ -std=c++23 {{hpc}} -DRUN_O1SEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_o1
     @echo "DONE {{bindir}}/{{name}}_o1    [O(1) unordered_map hash-index search]"
     @echo ""
 
 build-fsl:
     mkdir -p {{bindir}} {{data}}
-    g++ -std=c++20 {{hpc}} -DRUN_SIMDFSLSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_fsl
+    g++ -std=c++23 {{hpc}} -DRUN_SIMDFSLSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_fsl
     @echo "DONE {{bindir}}/{{name}}_simd  [SIMD FSL]"
     @echo ""
 
 build-fnv1a:
     mkdir -p {{bindir}} {{data}}
-    g++ -std=c++20 {{hpc}} -DRUN_SIMDFNV1ASEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_fnv1a
+    g++ -std=c++23 {{hpc}} -DRUN_SIMDFNV1ASEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_fnv1a
     @echo "DONE {{bindir}}/{{name}}_simd  [AVX512 + fnv1a]"
     @echo ""
 
 build-bin:
     mkdir -p {{bindir}} {{data}}
-    g++ -std=c++20 {{hpc}} -DRUN_BINARYSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_bin
+    g++ -std=c++23 {{hpc}} -DRUN_BINARYSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_bin
     @echo "DONE {{bindir}}/{{name}}_bin [binary search]"
     @echo ""
 
 build-treeter:
     mkdir -p {{bindir}} {{data}}
-    g++ -std=c++20 {{hpc}} -DRUN_TREETERNARYSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_ter
+    g++ -std=c++23 {{hpc}} -DRUN_TREETERNARYSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_ter
     @echo "DONE {{bindir}}/{{name}}_treeter [tree ternary search]"
     @echo ""
 
 
 build-treebin:
     mkdir -p {{bindir}} {{data}}
-    g++ -std=c++20 {{hpc}} -DRUN_TREEBINARYSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_treebin
+    g++ -std=c++23 {{hpc}} -DRUN_TREEBINARYSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_treebin
     @echo "DONE {{bindir}}/{{name}}_treebin [precomputed tree binary search]"
     @echo ""
 
 build-const:
     mkdir -p {{bindir}} {{data}}
-    g++ -std=c++20 {{hpc}} -DRUN_CONSTSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_const
+    g++ -std=c++23 {{hpc}} -DRUN_CONSTSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_const
     @echo "DONE {{bindir}}/{{name}}_static [const name size memcmp search]"
     @echo ""
 
 build-nosearch:
     mkdir -p {{bindir}} {{data}}
-    g++ -std=c++20 {{hpc}} -DRUN_NOSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_nosearch
+    g++ -std=c++23 {{hpc}} -DRUN_NOSEARCH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_nosearch
     @echo "DONE {{bindir}}/{{name}}_nosearch [no search char[5], cost baseline]"
     @echo ""
 
 build-nosearchhash:
     mkdir -p {{bindir}} {{data}}
-    g++ -std=c++20 {{hpc}} -DRUN_NOSEARCHHASH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_nosearchhash
+    g++ -std=c++23 {{hpc}} -DRUN_NOSEARCHHASH=1 {{src}} {{root_flags}} -o {{bindir}}/{{name}}_nosearchhash
     @echo "DONE {{bindir}}/{{name}}_nosearchhash [no search uint32_t, cost baseline]"
     @echo ""
 
